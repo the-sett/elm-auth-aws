@@ -309,7 +309,7 @@ innerUpdate region clientId msg authState =
             updateInitiateAuthResponse loginResult state
 
         ( InitiateAuthResponse refreshResult, AuthState.Refreshing state ) ->
-            updateInitiateAuthResponseToRefresh refreshResult state
+            updateInitiateAuthResponseForRefresh refreshResult state
 
         ( RespondToChallenge responseParams, AuthState.Challenged state ) ->
             updateChallengeResponse region clientId responseParams state
@@ -422,24 +422,6 @@ updateInitiateAuthResponse loginResult state =
                     handleAuthResult authResult state
 
 
-updateInitiateAuthResponseToRefresh :
-    Result.Result Http.Error CIP.InitiateAuthResponse
-    -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } m
-    -> ( AuthState, Cmd Msg )
-updateInitiateAuthResponseToRefresh loginResult state =
-    case Debug.log "loginResult" loginResult of
-        Err httpErr ->
-            failed state
-
-        Ok authResponse ->
-            case authResponse.authenticationResult of
-                Nothing ->
-                    failed state
-
-                Just authResult ->
-                    handleAuthResult authResult state
-
-
 handleAuthResult :
     CIP.AuthenticationResultType
     -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } m
@@ -479,6 +461,76 @@ handleAuthResult authResult state =
                         , decodedIdToken = decodedIdToken
                         , expiresAt = decodedAccessToken.exp
                         , refreshFrom = decodedAccessToken.exp
+                        }
+                        state
+                    , Cmd.none
+                    )
+
+                _ ->
+                    failed state
+
+        _ ->
+            failed state
+
+
+updateInitiateAuthResponseForRefresh :
+    Result.Result Http.Error CIP.InitiateAuthResponse
+    -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } { m | auth : Authenticated }
+    -> ( AuthState, Cmd Msg )
+updateInitiateAuthResponseForRefresh loginResult state =
+    case Debug.log "loginResult" loginResult of
+        Err httpErr ->
+            failed state
+
+        Ok authResponse ->
+            case authResponse.authenticationResult of
+                Nothing ->
+                    failed state
+
+                Just authResult ->
+                    handleAuthResultForRefresh authResult state
+
+
+handleAuthResultForRefresh :
+    CIP.AuthenticationResultType
+    -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } { m | auth : Authenticated }
+    -> ( AuthState, Cmd Msg )
+handleAuthResultForRefresh authResult state =
+    case ( authResult.idToken, authResult.accessToken ) of
+        ( Just idToken, Just accessToken ) ->
+            let
+                auth =
+                    AuthState.untag state
+                        |> .auth
+
+                rawAccessToken =
+                    Refined.unbox CIP.tokenModelType accessToken
+
+                rawIdToken =
+                    Refined.unbox CIP.tokenModelType idToken
+
+                decodedAccessTokenResult =
+                    rawAccessToken
+                        |> Jwt.decode Tokens.accessTokenDecoder
+                        |> Debug.log "accessToken"
+
+                decodedIdTokenResult =
+                    rawIdToken
+                        |> Jwt.decode Tokens.idTokenDecoder
+                        |> Debug.log "idToken"
+            in
+            case ( decodedAccessTokenResult, decodedIdTokenResult ) of
+                ( Ok decodedAccessToken, Ok decodedIdToken ) ->
+                    ( AuthState.toLoggedIn
+                        { auth
+                            | subject = decodedAccessToken.sub
+                            , scopes = [ decodedAccessToken.scope ]
+                            , accessToken = rawAccessToken
+                            , idToken = rawIdToken
+                            , decodedAccessToken = decodedAccessToken
+                            , decodedIdToken = decodedIdToken
+                            , expiresAt = decodedAccessToken.exp
+                            , refreshFrom = decodedAccessToken.exp
                         }
                         state
                     , Cmd.none
