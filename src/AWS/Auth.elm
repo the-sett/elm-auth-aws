@@ -16,12 +16,13 @@ import AWS.Core.Credentials
 import AWS.Core.Http
 import AWS.Core.Service exposing (Region, Service)
 import AuthAPI exposing (AuthAPI, Credentials, Status(..))
-import AuthState
+import AuthState exposing (Allowed, AuthState, Authenticated, ChallengeSpec)
 import Dict exposing (Dict)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Extra exposing (andMap, withDefault)
 import Jwt
+import Process
 import Refined
 import Task
 import Task.Extra
@@ -93,18 +94,7 @@ type alias Model =
 {-| The private authentication state.
 -}
 type Private
-    = Uninitialized
-    | RespondingToChallenges
-        { session : CIP.SessionType
-        , challenge : CIP.ChallengeNameType
-        , parameters : CIP.ChallengeParametersType
-        , username : String
-        }
-    | Authenticated
-        { refreshToken : CIP.TokenModelType
-        , idToken : CIP.TokenModelType
-        , accessToken : CIP.TokenModelType
-        }
+    = Private AuthState.AuthState
 
 
 {-| The internal authentication events.
@@ -141,7 +131,7 @@ init config =
                 { clientId = clientId
                 , userPoolId = config.userPoolId
                 , region = config.region
-                , innerModel = Uninitialized
+                , innerModel = Private AuthState.loggedOut
                 }
 
         Err strErr ->
@@ -190,40 +180,153 @@ requiredNewPassword new =
 -- Processing of auth related requests and internal auth state.
 
 
-noop model =
-    ( model, Cmd.none, Nothing )
+{-| Lifts the inner model out of the model.
+-}
+getAuthState : Model -> AuthState
+getAuthState model =
+    let
+        (Private inner) =
+            model.innerModel
+    in
+    inner
 
 
-failed model =
-    ( model, Cmd.none, Just Failed )
+{-| Lowers the inner model into the model.
+-}
+setAuthState : AuthState -> Model -> Model
+setAuthState inner model =
+    { model | innerModel = Private inner }
 
 
+{-| Extracts a summary view of the authentication status from the model.
+-}
+getStatus : AuthState -> Status Challenge
+getStatus authState =
+    let
+        extractAuth : AuthState.State p { auth : Authenticated } -> { scopes : List String, subject : String }
+        extractAuth state =
+            let
+                authModel =
+                    AuthState.untag state
+            in
+            { scopes = authModel.auth.scopes, subject = authModel.auth.subject }
+
+        extractChallenge : AuthState.State p { challenge : ChallengeSpec } -> Challenge
+        extractChallenge state =
+            let
+                authModel =
+                    AuthState.untag state
+            in
+            case authModel.challenge.challenge of
+                _ ->
+                    NewPasswordRequired
+    in
+    case authState of
+        AuthState.LoggedOut _ ->
+            LoggedOut
+
+        AuthState.Restoring _ ->
+            LoggedOut
+
+        AuthState.Attempting _ ->
+            LoggedOut
+
+        AuthState.Failed _ ->
+            Failed
+
+        AuthState.LoggedIn state ->
+            LoggedIn <| extractAuth state
+
+        AuthState.Refreshing state ->
+            LoggedIn <| extractAuth state
+
+        AuthState.Challenged state ->
+            Challenged <| extractChallenge state
+
+        AuthState.Responding state ->
+            Challenged <| extractChallenge state
+
+
+{-| Compares two AuthStates and outputs the status of the newer one, if it differs
+from the older one, otherwise Nothing.
+-}
+statusChange : AuthState -> AuthState -> Maybe (Status Challenge)
+statusChange oldAuthState newAuthState =
+    let
+        oldStatus =
+            getStatus oldAuthState
+
+        newStatus =
+            getStatus newAuthState
+    in
+    case ( oldStatus, newStatus ) of
+        ( LoggedIn _, LoggedIn _ ) ->
+            Nothing
+
+        ( Failed, Failed ) ->
+            Nothing
+
+        ( LoggedOut, LoggedOut ) ->
+            Nothing
+
+        ( _, _ ) ->
+            Just newStatus
+
+
+noop authState =
+    ( authState, Cmd.none, Nothing )
+
+
+reset =
+    let
+        newAuthState =
+            AuthState.loggedOut
+    in
+    ( newAuthState, Cmd.none, Nothing )
+
+
+failed state =
+    let
+        newAuthState =
+            AuthState.toFailed state
+    in
+    ( newAuthState, Cmd.none, Nothing )
+
+
+{-| Updates the model from Auth commands.
+-}
 update : Msg -> Model -> ( Model, Cmd Msg, Maybe (Status Challenge) )
 update msg model =
-    case msg of
-        LogIn credentials ->
-            updateLogin credentials model
+    let
+        ( innerModel, cmds, maybeStatus ) =
+            getAuthState model |> innerUpdate model.region model.clientId msg
+    in
+    ( setAuthState innerModel model, cmds, maybeStatus )
 
-        RespondToChallenge responseParams ->
-            case model.innerModel of
-                RespondingToChallenges challengeState ->
-                    updateChallengeResponse challengeState responseParams model
 
-                _ ->
-                    failed model
+innerUpdate : Region -> CIP.ClientIdType -> Msg -> AuthState -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+innerUpdate region clientId msg authState =
+    case ( msg, authState ) of
+        ( LogIn credentials, AuthState.LoggedOut state ) ->
+            updateLogin region clientId credentials state
 
-        InitiateAuthResponse loginResult ->
-            updateInitiateAuthResponse loginResult model
+        ( InitiateAuthResponse loginResult, AuthState.Attempting state ) ->
+            updateInitiateAuthResponse loginResult state
 
-        Refresh ->
-            ( model, Cmd.none, Just LoggedOut )
+        ( RespondToChallenge responseParams, AuthState.Challenged state ) ->
+            updateChallengeResponse region clientId responseParams state
 
         _ ->
-            noop model
+            noop authState
 
 
-updateLogin : Credentials -> Model -> ( Model, Cmd Msg, Maybe (Status Challenge) )
-updateLogin credentials model =
+updateLogin :
+    Region
+    -> CIP.ClientIdType
+    -> Credentials
+    -> AuthState.State { a | attempting : Allowed } m
+    -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+updateLogin region clientId credentials state =
     let
         authParams =
             Dict.empty
@@ -234,7 +337,7 @@ updateLogin credentials model =
             CIP.initiateAuth
                 { userContextData = Nothing
                 , clientMetadata = Nothing
-                , clientId = model.clientId
+                , clientId = clientId
                 , authParameters = Just authParams
                 , authFlow = CIP.AuthFlowTypeUserPasswordAuth
                 , analyticsMetadata = Nothing
@@ -242,48 +345,20 @@ updateLogin credentials model =
 
         authCmd =
             authRequest
-                |> AWS.Core.Http.sendUnsigned (CIP.service model.region)
+                |> AWS.Core.Http.sendUnsigned (CIP.service region)
                 |> Task.attempt InitiateAuthResponse
     in
-    ( model, authCmd, Nothing )
-
-
-updateChallengeResponse :
-    { s | session : CIP.SessionType, challenge : CIP.ChallengeNameType, username : String }
-    -> Dict String String
-    -> Model
-    -> ( Model, Cmd Msg, Maybe (Status Challenge) )
-updateChallengeResponse { session, challenge, username } responseParams model =
-    let
-        preparedParams =
-            Dict.insert "USERNAME" username responseParams
-
-        challengeRequest =
-            CIP.respondToAuthChallenge
-                { userContextData = Nothing
-                , session = Just session
-                , clientId = model.clientId
-                , challengeResponses = Just preparedParams
-                , challengeName = CIP.ChallengeNameTypeNewPasswordRequired
-                , analyticsMetadata = Nothing
-                }
-
-        challengeCmd =
-            challengeRequest
-                |> AWS.Core.Http.sendUnsigned (CIP.service model.region)
-                |> Task.attempt RespondToChallengeResponse
-    in
-    ( model, challengeCmd, Nothing )
+    ( AuthState.toAttempting state, authCmd, Nothing )
 
 
 updateInitiateAuthResponse :
     Result.Result Http.Error CIP.InitiateAuthResponse
-    -> Model
-    -> ( Model, Cmd Msg, Maybe (Status Challenge) )
-updateInitiateAuthResponse loginResult model =
+    -> AuthState.State { a | loggedIn : Allowed, failed : Allowed, challenged : Allowed } m
+    -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+updateInitiateAuthResponse loginResult state =
     case Debug.log "loginResult" loginResult of
         Err httpErr ->
-            failed model
+            failed state
 
         Ok authResponse ->
             case authResponse.authenticationResult of
@@ -295,17 +370,20 @@ updateInitiateAuthResponse loginResult model =
                         )
                     of
                         ( Just session, Just parameters, Just challengeType ) ->
-                            handleChallenge session parameters challengeType model
+                            handleChallenge session parameters challengeType state
 
                         ( _, _, _ ) ->
-                            failed model
+                            failed state
 
                 Just authResult ->
-                    handleAuthResult authResult model
+                    handleAuthResult authResult state
 
 
-handleAuthResult : CIP.AuthenticationResultType -> Model -> ( Model, Cmd Msg, Maybe (Status Challenge) )
-handleAuthResult authResult model =
+handleAuthResult :
+    CIP.AuthenticationResultType
+    -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } m
+    -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+handleAuthResult authResult state =
     case ( authResult.refreshToken, authResult.idToken, authResult.accessToken ) of
         ( Just refreshToken, Just idToken, Just accessToken ) ->
             let
@@ -319,51 +397,122 @@ handleAuthResult authResult model =
                         |> Jwt.decode Tokens.idTokenDecoder
                         |> Debug.log "idToken"
             in
-            ( { model
-                | innerModel =
-                    Authenticated
-                        { refreshToken = refreshToken
-                        , idToken = idToken
-                        , accessToken = accessToken
-                        }
-              }
-            , Cmd.none
-            , LoggedIn { scopes = [], subject = "" }
-                |> Just
-            )
+            -- ( AuthState.toLoggedIn
+            --     { refreshToken = refreshToken
+            --     , idToken = idToken
+            --     , accessToken = accessToken
+            --     }
+            --     state
+            -- , Cmd.none
+            -- , LoggedIn { scopes = [], subject = "" }
+            --     |> Just
+            -- )
+            failed state
 
         _ ->
-            failed model
+            failed state
 
 
 handleChallenge :
     CIP.SessionType
     -> Dict String String
     -> CIP.ChallengeNameType
-    -> Model
-    -> ( Model, Cmd Msg, Maybe (Status Challenge) )
-handleChallenge session parameters challengeType model =
+    -> AuthState.State { a | challenged : Allowed, failed : Allowed } m
+    -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+handleChallenge session parameters challengeType state =
     let
         maybeUsername =
             Dict.get "USER_ID_FOR_SRP" parameters
     in
     case ( challengeType, maybeUsername ) of
         ( CIP.ChallengeNameTypeNewPasswordRequired, Just username ) ->
-            ( { model
-                | innerModel =
-                    RespondingToChallenges
-                        { session = session
-                        , challenge = challengeType
-                        , parameters = parameters
-                        , username = username
-                        }
-              }
+            ( AuthState.toChallenged
+                { session = session
+                , challenge = challengeType
+                , parameters = parameters
+                , username = username
+                }
+                state
             , Cmd.none
             , Challenged NewPasswordRequired |> Just
             )
 
         _ ->
-            failed model
+            failed state
+
+
+updateChallengeResponse :
+    Region
+    -> CIP.ClientIdType
+    -> Dict String String
+    -> AuthState.State { a | responding : Allowed, failed : Allowed } { m | challenge : ChallengeSpec }
+    -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+updateChallengeResponse region clientId responseParams state =
+    let
+        challengeSpec =
+            AuthState.untag state
+                |> .challenge
+
+        preparedParams =
+            Dict.insert "USERNAME" challengeSpec.username responseParams
+
+        challengeRequest =
+            CIP.respondToAuthChallenge
+                { userContextData = Nothing
+                , session = Just challengeSpec.session
+                , clientId = clientId
+                , challengeResponses = Just preparedParams
+                , challengeName = CIP.ChallengeNameTypeNewPasswordRequired
+                , analyticsMetadata = Nothing
+                }
+
+        challengeCmd =
+            challengeRequest
+                |> AWS.Core.Http.sendUnsigned (CIP.service region)
+                |> Task.attempt RespondToChallengeResponse
+    in
+    ( AuthState.toResponding challengeSpec state, challengeCmd, Nothing )
+
+
+
+-- Functions for building and executing the refresh cycle task.
+
+
+second : Int
+second =
+    1000
+
+
+delayedRefreshCmd : Authenticated -> Cmd Msg
+delayedRefreshCmd model =
+    tokenExpiryTask model.refreshFrom
+        |> Task.attempt (\_ -> Refresh)
+
+
+{-| A delay task that should end 30 seconds before the token is due to expire.
+If the token expiry is less than 1 minute away, the delay is set to half of the remaining
+time, which should be under 30 seconds.
+The delay will expire immediately if the token expiry is already in the past.
+-}
+tokenExpiryTask : Posix -> Task.Task Never ()
+tokenExpiryTask timeout =
+    let
+        safeInterval =
+            30 * second
+
+        delay posixBy posixNow =
+            let
+                by =
+                    Time.posixToMillis posixBy
+
+                now =
+                    Time.posixToMillis posixNow
+            in
+            max ((by - now) // 2) (by - now - safeInterval)
+                |> max 0
+    in
+    Time.now
+        |> Task.andThen (\now -> Process.sleep <| toFloat (delay timeout now))
 
 
 

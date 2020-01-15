@@ -1,7 +1,8 @@
 module AuthState exposing
     ( Allowed
     , AuthState(..)
-    ,  Authenticated
+    , Authenticated
+    ,  ChallengeSpec
        -- Convenience re-exports from StateMachine
 
     , State
@@ -12,9 +13,11 @@ module AuthState exposing
        -- State transitions
 
     , toAttempting
+    , toChallenged
     , toFailed
     , toLoggedIn
     , toRefreshing
+    , toResponding
     , toRestoring
     ,  untag
        -- Constructors
@@ -70,7 +73,8 @@ type AuthState
     | Failed (State {} {})
     | LoggedIn (State { refreshing : Allowed } { auth : Authenticated })
     | Refreshing (State { loggedIn : Allowed } { auth : Authenticated })
-    | Challenged (State { loggedIn : Allowed, failed : Allowed, challenged : Allowed } { challenge : ChallengeSpec })
+    | Challenged (State { responding : Allowed, failed : Allowed } { challenge : ChallengeSpec })
+    | Responding (State { loggedIn : Allowed, failed : Allowed, challenged : Allowed } { challenge : ChallengeSpec })
 
 
 
@@ -110,6 +114,11 @@ refreshing model =
 challenged : ChallengeSpec -> AuthState
 challenged model =
     State { challenge = model } |> Challenged
+
+
+responding : ChallengeSpec -> AuthState
+responding model =
+    State { challenge = model } |> Responding
 
 
 
@@ -175,3 +184,8 @@ toRefreshing (State model) =
 toChallenged : ChallengeSpec -> State { a | challenged : Allowed } m -> AuthState
 toChallenged spec _ =
     challenged spec
+
+
+toResponding : ChallengeSpec -> State { a | responding : Allowed } m -> AuthState
+toResponding spec _ =
+    responding spec
