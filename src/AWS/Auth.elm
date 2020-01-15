@@ -34,6 +34,11 @@ import Tokens exposing (AccessToken, IdToken)
 -- The Auth API implementation.
 
 
+{-| An extended API for working with Cognito.
+
+This provides the functions needed to response to Cognito challenges.
+
+-}
 api : AuthAPI Config Model Msg Challenge CognitoAPI
 api =
     { init = init
