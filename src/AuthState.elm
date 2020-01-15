@@ -46,9 +46,9 @@ type alias Allowed =
 type alias Authenticated =
     { subject : String
     , scopes : List String
-    , accessToken : String
-    , idToken : String
-    , refreshToken : String
+    , accessToken : CIP.TokenModelType
+    , idToken : CIP.TokenModelType
+    , refreshToken : CIP.TokenModelType
     , decodedAccessToken : AccessToken
     , decodedIdToken : IdToken
     , expiresAt : Posix
@@ -72,7 +72,7 @@ type AuthState
     | Restoring (State { loggedIn : Allowed } {})
     | Attempting (State { loggedIn : Allowed, failed : Allowed, challenged : Allowed } {})
     | Failed (State {} {})
-    | LoggedIn (State { refreshing : Allowed } { auth : Authenticated })
+    | LoggedIn (State { refreshing : Allowed, loggedOut : Allowed } { auth : Authenticated })
     | Refreshing (State { loggedIn : Allowed, failed : Allowed } { auth : Authenticated })
     | Challenged (State { responding : Allowed, failed : Allowed } { challenge : ChallengeSpec })
     | Responding (State { loggedIn : Allowed, failed : Allowed, challenged : Allowed } { challenge : ChallengeSpec })

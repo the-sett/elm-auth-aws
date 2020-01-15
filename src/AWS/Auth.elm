@@ -106,6 +106,7 @@ type Msg
     | NotAuthed
     | RespondToChallenge (Dict String String)
     | InitiateAuthResponse (Result.Result Http.Error CIP.InitiateAuthResponse)
+    | SignOutResponse (Result.Result Http.Error CIP.GlobalSignOutResponse)
     | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
 
 
@@ -139,12 +140,12 @@ init config =
 
 unauthed : Cmd Msg
 unauthed =
-    Cmd.none
+    NotAuthed |> Task.Extra.message
 
 
 logout : Cmd Msg
 logout =
-    Cmd.none
+    LogOut |> Task.Extra.message
 
 
 login : Credentials -> Cmd Msg
@@ -296,8 +297,8 @@ innerUpdate region clientId msg authState =
         ( LogIn credentials, AuthState.LoggedOut state ) ->
             updateLogin region clientId credentials state
 
-        ( LogOut, _ ) ->
-            reset
+        ( LogOut, AuthState.LoggedIn state ) ->
+            updateLogout region state
 
         ( NotAuthed, _ ) ->
             reset
@@ -361,6 +362,23 @@ updateLogin region clientId credentials state =
     ( AuthState.toAttempting state, authCmd )
 
 
+updateLogout :
+    Region
+    -> AuthState.State { a | loggedOut : Allowed } { m | auth : Authenticated }
+    -> ( AuthState, Cmd Msg )
+updateLogout region state =
+    let
+        auth =
+            AuthState.untag state |> .auth
+
+        logoutCmd =
+            CIP.globalSignOut { accessToken = auth.accessToken }
+                |> AWS.Core.Http.sendUnsigned (CIP.service region)
+                |> Task.attempt SignOutResponse
+    in
+    ( AuthState.loggedOut, logoutCmd )
+
+
 updateRefresh :
     Region
     -> CIP.ClientIdType
@@ -372,9 +390,12 @@ updateRefresh region clientId state =
             AuthState.untag state
                 |> .auth
 
+        refreshToken =
+            Refined.unbox CIP.tokenModelType auth.refreshToken
+
         authParams =
             Dict.empty
-                |> Dict.insert "REFRESH_TOKEN" auth.refreshToken
+                |> Dict.insert "REFRESH_TOKEN" refreshToken
 
         authRequest =
             CIP.initiateAuth
@@ -454,9 +475,9 @@ handleAuthResult authResult state =
                     ( AuthState.toLoggedIn
                         { subject = decodedAccessToken.sub
                         , scopes = [ decodedAccessToken.scope ]
-                        , accessToken = rawAccessToken
-                        , idToken = rawIdToken
-                        , refreshToken = rawRefreshToken
+                        , accessToken = accessToken
+                        , idToken = idToken
+                        , refreshToken = refreshToken
                         , decodedAccessToken = decodedAccessToken
                         , decodedIdToken = decodedIdToken
                         , expiresAt = decodedAccessToken.exp
@@ -525,8 +546,8 @@ handleAuthResultForRefresh authResult state =
                         { auth
                             | subject = decodedAccessToken.sub
                             , scopes = [ decodedAccessToken.scope ]
-                            , accessToken = rawAccessToken
-                            , idToken = rawIdToken
+                            , accessToken = accessToken
+                            , idToken = idToken
                             , decodedAccessToken = decodedAccessToken
                             , decodedIdToken = decodedIdToken
                             , expiresAt = decodedAccessToken.exp
