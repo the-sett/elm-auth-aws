@@ -273,38 +273,21 @@ statusChange oldAuthState newAuthState =
             Just newStatus
 
 
-noop authState =
-    ( authState, Cmd.none, Nothing )
-
-
-reset =
-    let
-        newAuthState =
-            AuthState.loggedOut
-    in
-    ( newAuthState, Cmd.none, Nothing )
-
-
-failed state =
-    let
-        newAuthState =
-            AuthState.toFailed state
-    in
-    ( newAuthState, Cmd.none, Nothing )
-
-
 {-| Updates the model from Auth commands.
 -}
 update : Msg -> Model -> ( Model, Cmd Msg, Maybe (Status Challenge) )
 update msg model =
     let
-        ( innerModel, cmds, maybeStatus ) =
-            getAuthState model |> innerUpdate model.region model.clientId msg
+        authState =
+            getAuthState model
+
+        ( newAuthState, cmds ) =
+            innerUpdate model.region model.clientId msg authState
     in
-    ( setAuthState innerModel model, cmds, maybeStatus )
+    ( setAuthState newAuthState model, cmds, statusChange authState newAuthState )
 
 
-innerUpdate : Region -> CIP.ClientIdType -> Msg -> AuthState -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+innerUpdate : Region -> CIP.ClientIdType -> Msg -> AuthState -> ( AuthState, Cmd Msg )
 innerUpdate region clientId msg authState =
     case ( msg, authState ) of
         ( LogIn credentials, AuthState.LoggedOut state ) ->
@@ -320,12 +303,24 @@ innerUpdate region clientId msg authState =
             noop authState
 
 
+noop authState =
+    ( authState, Cmd.none )
+
+
+reset =
+    ( AuthState.loggedOut, Cmd.none )
+
+
+failed state =
+    ( AuthState.toFailed state, Cmd.none )
+
+
 updateLogin :
     Region
     -> CIP.ClientIdType
     -> Credentials
     -> AuthState.State { a | attempting : Allowed } m
-    -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+    -> ( AuthState, Cmd Msg )
 updateLogin region clientId credentials state =
     let
         authParams =
@@ -348,13 +343,13 @@ updateLogin region clientId credentials state =
                 |> AWS.Core.Http.sendUnsigned (CIP.service region)
                 |> Task.attempt InitiateAuthResponse
     in
-    ( AuthState.toAttempting state, authCmd, Nothing )
+    ( AuthState.toAttempting state, authCmd )
 
 
 updateInitiateAuthResponse :
     Result.Result Http.Error CIP.InitiateAuthResponse
     -> AuthState.State { a | loggedIn : Allowed, failed : Allowed, challenged : Allowed } m
-    -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+    -> ( AuthState, Cmd Msg )
 updateInitiateAuthResponse loginResult state =
     case Debug.log "loginResult" loginResult of
         Err httpErr ->
@@ -382,7 +377,7 @@ updateInitiateAuthResponse loginResult state =
 handleAuthResult :
     CIP.AuthenticationResultType
     -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } m
-    -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+    -> ( AuthState, Cmd Msg )
 handleAuthResult authResult state =
     case ( authResult.refreshToken, authResult.idToken, authResult.accessToken ) of
         ( Just refreshToken, Just idToken, Just accessToken ) ->
@@ -418,7 +413,7 @@ handleChallenge :
     -> Dict String String
     -> CIP.ChallengeNameType
     -> AuthState.State { a | challenged : Allowed, failed : Allowed } m
-    -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+    -> ( AuthState, Cmd Msg )
 handleChallenge session parameters challengeType state =
     let
         maybeUsername =
@@ -434,7 +429,6 @@ handleChallenge session parameters challengeType state =
                 }
                 state
             , Cmd.none
-            , Challenged NewPasswordRequired |> Just
             )
 
         _ ->
@@ -446,7 +440,7 @@ updateChallengeResponse :
     -> CIP.ClientIdType
     -> Dict String String
     -> AuthState.State { a | responding : Allowed, failed : Allowed } { m | challenge : ChallengeSpec }
-    -> ( AuthState, Cmd Msg, Maybe (Status Challenge) )
+    -> ( AuthState, Cmd Msg )
 updateChallengeResponse region clientId responseParams state =
     let
         challengeSpec =
@@ -471,7 +465,7 @@ updateChallengeResponse region clientId responseParams state =
                 |> AWS.Core.Http.sendUnsigned (CIP.service region)
                 |> Task.attempt RespondToChallengeResponse
     in
-    ( AuthState.toResponding challengeSpec state, challengeCmd, Nothing )
+    ( AuthState.toResponding challengeSpec state, challengeCmd )
 
 
 
