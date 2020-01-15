@@ -1,4 +1,4 @@
-module Auth exposing
+module AWS.Auth exposing
     ( Config, Credentials, Status(..)
     , login, refresh, logout, unauthed
     , Model, Msg, init, update
@@ -28,20 +28,27 @@ import Task
 import Task.Extra
 
 
+
+-- The Auth API implementation.
+
+
+api : AuthAPI Config Model Msg Never Challenge
+api =
+    { init = init
+    , login = login
+    , logout = logout
+    , unauthed = unauthed
+    , refresh = refresh
+    , update = update
+    }
+
+
 {-| The configuration specifying the API root to authenticate against.
 -}
 type alias Config =
     { clientId : String
     , userPoolId : String
     , region : Region
-    }
-
-
-{-| Username and password based login credentials.
--}
-type alias Credentials =
-    { username : String
-    , password : String
     }
 
 
@@ -81,13 +88,6 @@ type Msg
 
 -- | RefreshResponse (Result.Result Http.Error Model.AuthResponse)
 -- | LogOutResponse (Result.Result Http.Error ())
-
-
-type Status
-    = LoggedOut
-    | Failed
-    | LoggedIn { scopes : List String, subject : String }
-    | Challenged Challenge
 
 
 type Challenge
