@@ -18,10 +18,13 @@ import AWS.Core.Service exposing (Region, Service)
 import AuthAPI exposing (AuthAPI, Credentials, Status(..))
 import Dict exposing (Dict)
 import Http
-import Jwt exposing (Token)
+import Json.Decode as Decode exposing (Decoder)
+import Json.Decode.Extra exposing (andMap, withDefault)
+import Jwt
 import Refined
 import Task
 import Task.Extra
+import Time exposing (Posix)
 
 
 
@@ -37,6 +40,7 @@ api =
     , refresh = refresh
     , update = update
     , requiredNewPassword = requiredNewPassword
+    , addAuthHeaders = addAuthHeaders
     }
 
 
@@ -46,23 +50,26 @@ type alias CognitoAPI =
     { requiredNewPassword : String -> Cmd Msg }
 
 
+{-| The types of challenges that Cognito can issue.
+
+Challenge types not yet covered:
+
+  - SmsMfa
+  - SoftwareTokenMfa
+  - SelectMfaType
+  - MfaSetup
+  - PasswordVerifier
+  - CustomChallenge
+  - DeviceSrpAuth
+  - DevicePasswordVerifier
+  - AdminNoSrpAuth
+
+-}
 type Challenge
     = NewPasswordRequired
 
 
-
--- | SmsMfa
--- | SoftwareTokenMfa
--- | SelectMfaType
--- | MfaSetup
--- | PasswordVerifier
--- | CustomChallenge
--- | DeviceSrpAuth
--- | DevicePasswordVerifier
--- | AdminNoSrpAuth
-
-
-{-| The configuration specifying the API root to authenticate against.
+{-| The configuration needed to interact with Cognito.
 -}
 type alias Config =
     { clientId : String
@@ -71,6 +78,8 @@ type alias Config =
     }
 
 
+{-| The authentication model consisting of the evaluated config and the private state.
+-}
 type alias Model =
     { clientId : CIP.ClientIdType
     , userPoolId : String
@@ -79,6 +88,8 @@ type alias Model =
     }
 
 
+{-| The private authentication state.
+-}
 type Private
     = Uninitialized
     | RespondingToChallenges
@@ -94,6 +105,41 @@ type Private
         }
 
 
+{-| Cognito access token.
+-}
+type alias AccessToken =
+    { sub : String
+    , event_id : String
+    , token_use : String
+    , scope : String
+    , auth_time : Posix
+    , iss : String
+    , exp : Posix
+    , iat : Posix
+    , jti : String
+    , client_id : String
+    , username : String
+    }
+
+
+{-| Cognito id token.
+-}
+type alias IdToken =
+    { sub : String
+    , aud : String
+    , event_id : String
+    , token_use : String
+    , auth_time : Posix
+    , iss : String
+    , cognito_username : String
+    , exp : Posix
+    , iat : Posix
+    , email : String
+    }
+
+
+{-| The internal authentication events.
+-}
 type Msg
     = LogIn Credentials
     | Refresh
@@ -109,6 +155,11 @@ type Msg
 -- | LogOutResponse (Result.Result Http.Error ())
 
 
+{-| Attempts to create an initialalized auth state from the configuration.
+
+This may result in errors if the configuration is not correct.
+
+-}
 init : Config -> Result String Model
 init config =
     let
@@ -126,6 +177,10 @@ init config =
 
         Err strErr ->
             "clientId " ++ Refined.stringErrorToString strErr |> Err
+
+
+
+-- Standard auth commands.
 
 
 unauthed : Cmd Msg
@@ -146,6 +201,10 @@ login credentials =
 refresh : Cmd Msg
 refresh =
     Refresh |> Task.Extra.message
+
+
+
+-- Extended auth commands for Cognito for responding to challenges.
 
 
 requiredNewPassword : String -> Cmd Msg
@@ -214,7 +273,7 @@ updateLogin credentials model =
 
         authCmd =
             authRequest
-                |> AWS.Core.Http.sendUnsigned (cipService model.region)
+                |> AWS.Core.Http.sendUnsigned (CIP.service model.region)
                 |> Task.attempt InitiateAuthResponse
     in
     ( model, authCmd, Nothing )
@@ -242,7 +301,7 @@ updateChallengeResponse { session, challenge, username } responseParams model =
 
         challengeCmd =
             challengeRequest
-                |> AWS.Core.Http.sendUnsigned (cipService model.region)
+                |> AWS.Core.Http.sendUnsigned (CIP.service model.region)
                 |> Task.attempt RespondToChallengeResponse
     in
     ( model, challengeCmd, Nothing )
@@ -283,12 +342,12 @@ handleAuthResult authResult model =
             let
                 _ =
                     Refined.unbox CIP.tokenModelType accessToken
-                        |> Jwt.decodeWithErrors
+                        |> Jwt.decode accessTokenDecoder
                         |> Debug.log "accessToken"
 
                 _ =
                     Refined.unbox CIP.tokenModelType idToken
-                        |> Jwt.decodeWithErrors
+                        |> Jwt.decode idTokenDecoder
                         |> Debug.log "idToken"
             in
             ( { model
@@ -338,8 +397,54 @@ handleChallenge session parameters challengeType model =
             failed model
 
 
-{-| Provides the service handle for a specified region.
+
+-- Authorising HTTP requests.
+
+
+addAuthHeaders : model -> List Http.Header -> List Http.Header
+addAuthHeaders model headers =
+    headers
+
+
+
+-- Codecs for JWT Tokens
+
+
+accessTokenDecoder : Decoder AccessToken
+accessTokenDecoder =
+    Decode.succeed AccessToken
+        |> andMap (Decode.field "sub" Decode.string)
+        |> andMap (Decode.field "event_id" Decode.string)
+        |> andMap (Decode.field "token_use" Decode.string)
+        |> andMap (Decode.field "scope" Decode.string)
+        |> andMap (Decode.field "auth_time" decodePosix)
+        |> andMap (Decode.field "iss" Decode.string)
+        |> andMap (Decode.field "exp" decodePosix)
+        |> andMap (Decode.field "iat" decodePosix)
+        |> andMap (Decode.field "jti" Decode.string)
+        |> andMap (Decode.field "client_id" Decode.string)
+        |> andMap (Decode.field "username" Decode.string)
+
+
+idTokenDecoder : Decoder IdToken
+idTokenDecoder =
+    Decode.succeed IdToken
+        |> andMap (Decode.field "sub" Decode.string)
+        |> andMap (Decode.field "aud" Decode.string)
+        |> andMap (Decode.field "event_id" Decode.string)
+        |> andMap (Decode.field "token_use" Decode.string)
+        |> andMap (Decode.field "auth_time" decodePosix)
+        |> andMap (Decode.field "iss" Decode.string)
+        |> andMap (Decode.field "cognito:username" Decode.string)
+        |> andMap (Decode.field "exp" decodePosix)
+        |> andMap (Decode.field "iat" decodePosix)
+        |> andMap (Decode.field "email" Decode.string)
+
+
+{-| Decodes an integer as a posix timestamp.
 -}
-cipService : String -> Service
-cipService awsRegion =
-    CIP.service awsRegion
+decodePosix : Decoder Posix
+decodePosix =
+    Decode.map
+        (Time.millisToPosix << (*) 1000)
+        Decode.int
