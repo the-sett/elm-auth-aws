@@ -33,7 +33,7 @@ import Task.Extra
 -- The Auth API implementation.
 
 
-api : AuthAPI Config Model Msg Challenge {}
+api : AuthAPI Config Model Msg Challenge CognitoAPI
 api =
     { init = init
     , login = login
@@ -41,7 +41,30 @@ api =
     , unauthed = unauthed
     , refresh = refresh
     , update = update
+    , requiredNewPassword = requiredNewPassword
     }
+
+
+{-| AWS Cognito specific API for responding to challenges.
+-}
+type alias CognitoAPI =
+    { requiredNewPassword : String -> Cmd Msg }
+
+
+type Challenge
+    = NewPasswordRequired
+
+
+
+-- | SmsMfa
+-- | SoftwareTokenMfa
+-- | SelectMfaType
+-- | MfaSetup
+-- | PasswordVerifier
+-- | CustomChallenge
+-- | DeviceSrpAuth
+-- | DevicePasswordVerifier
+-- | AdminNoSrpAuth
 
 
 {-| The configuration specifying the API root to authenticate against.
@@ -89,22 +112,6 @@ type Msg
 
 -- | RefreshResponse (Result.Result Http.Error Model.AuthResponse)
 -- | LogOutResponse (Result.Result Http.Error ())
-
-
-type Challenge
-    = NewPasswordRequired
-
-
-
--- | SmsMfa
--- | SoftwareTokenMfa
--- | SelectMfaType
--- | MfaSetup
--- | PasswordVerifier
--- | CustomChallenge
--- | DeviceSrpAuth
--- | DevicePasswordVerifier
--- | AdminNoSrpAuth
 
 
 init : Config -> Result String Model
