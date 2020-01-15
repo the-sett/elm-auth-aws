@@ -25,6 +25,7 @@ import Refined
 import Task
 import Task.Extra
 import Time exposing (Posix)
+import Tokens exposing (AccessToken, IdToken)
 
 
 
@@ -103,39 +104,6 @@ type Private
         , idToken : CIP.TokenModelType
         , accessToken : CIP.TokenModelType
         }
-
-
-{-| Cognito access token.
--}
-type alias AccessToken =
-    { sub : String
-    , event_id : String
-    , token_use : String
-    , scope : String
-    , auth_time : Posix
-    , iss : String
-    , exp : Posix
-    , iat : Posix
-    , jti : String
-    , client_id : String
-    , username : String
-    }
-
-
-{-| Cognito id token.
--}
-type alias IdToken =
-    { sub : String
-    , aud : String
-    , event_id : String
-    , token_use : String
-    , auth_time : Posix
-    , iss : String
-    , cognito_username : String
-    , exp : Posix
-    , iat : Posix
-    , email : String
-    }
 
 
 {-| The internal authentication events.
@@ -221,12 +189,12 @@ requiredNewPassword new =
 -- Processing of auth related requests and internal auth state.
 
 
-failed model =
-    ( model, Cmd.none, Just Failed )
-
-
 noop model =
     ( model, Cmd.none, Nothing )
+
+
+failed model =
+    ( model, Cmd.none, Just Failed )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, Maybe (Status Challenge) )
@@ -342,12 +310,12 @@ handleAuthResult authResult model =
             let
                 _ =
                     Refined.unbox CIP.tokenModelType accessToken
-                        |> Jwt.decode accessTokenDecoder
+                        |> Jwt.decode Tokens.accessTokenDecoder
                         |> Debug.log "accessToken"
 
                 _ =
                     Refined.unbox CIP.tokenModelType idToken
-                        |> Jwt.decode idTokenDecoder
+                        |> Jwt.decode Tokens.idTokenDecoder
                         |> Debug.log "idToken"
             in
             ( { model
@@ -404,47 +372,3 @@ handleChallenge session parameters challengeType model =
 addAuthHeaders : model -> List Http.Header -> List Http.Header
 addAuthHeaders model headers =
     headers
-
-
-
--- Codecs for JWT Tokens
-
-
-accessTokenDecoder : Decoder AccessToken
-accessTokenDecoder =
-    Decode.succeed AccessToken
-        |> andMap (Decode.field "sub" Decode.string)
-        |> andMap (Decode.field "event_id" Decode.string)
-        |> andMap (Decode.field "token_use" Decode.string)
-        |> andMap (Decode.field "scope" Decode.string)
-        |> andMap (Decode.field "auth_time" decodePosix)
-        |> andMap (Decode.field "iss" Decode.string)
-        |> andMap (Decode.field "exp" decodePosix)
-        |> andMap (Decode.field "iat" decodePosix)
-        |> andMap (Decode.field "jti" Decode.string)
-        |> andMap (Decode.field "client_id" Decode.string)
-        |> andMap (Decode.field "username" Decode.string)
-
-
-idTokenDecoder : Decoder IdToken
-idTokenDecoder =
-    Decode.succeed IdToken
-        |> andMap (Decode.field "sub" Decode.string)
-        |> andMap (Decode.field "aud" Decode.string)
-        |> andMap (Decode.field "event_id" Decode.string)
-        |> andMap (Decode.field "token_use" Decode.string)
-        |> andMap (Decode.field "auth_time" decodePosix)
-        |> andMap (Decode.field "iss" Decode.string)
-        |> andMap (Decode.field "cognito:username" Decode.string)
-        |> andMap (Decode.field "exp" decodePosix)
-        |> andMap (Decode.field "iat" decodePosix)
-        |> andMap (Decode.field "email" Decode.string)
-
-
-{-| Decodes an integer as a posix timestamp.
--}
-decodePosix : Decoder Posix
-decodePosix =
-    Decode.map
-        (Time.millisToPosix << (*) 1000)
-        Decode.int
