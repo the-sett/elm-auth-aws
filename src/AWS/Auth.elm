@@ -109,11 +109,6 @@ type Msg
     | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
 
 
-
--- | RefreshResponse (Result.Result Http.Error Model.AuthResponse)
--- | LogOutResponse (Result.Result Http.Error ())
-
-
 {-| Attempts to create an initialalized auth state from the configuration.
 
 This may result in errors if the configuration is not correct.
@@ -296,12 +291,25 @@ update msg model =
 
 innerUpdate : Region -> CIP.ClientIdType -> Msg -> AuthState -> ( AuthState, Cmd Msg )
 innerUpdate region clientId msg authState =
+    -- | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
     case ( msg, authState ) of
         ( LogIn credentials, AuthState.LoggedOut state ) ->
             updateLogin region clientId credentials state
 
+        ( LogOut, _ ) ->
+            reset
+
+        ( NotAuthed, _ ) ->
+            reset
+
+        ( Refresh, AuthState.LoggedIn state ) ->
+            updateRefresh region clientId state
+
         ( InitiateAuthResponse loginResult, AuthState.Attempting state ) ->
             updateInitiateAuthResponse loginResult state
+
+        ( InitiateAuthResponse refreshResult, AuthState.Refreshing state ) ->
+            updateInitiateAuthResponseToRefresh refreshResult state
 
         ( RespondToChallenge responseParams, AuthState.Challenged state ) ->
             updateChallengeResponse region clientId responseParams state
@@ -353,6 +361,39 @@ updateLogin region clientId credentials state =
     ( AuthState.toAttempting state, authCmd )
 
 
+updateRefresh :
+    Region
+    -> CIP.ClientIdType
+    -> AuthState.State { a | refreshing : Allowed } { m | auth : Authenticated }
+    -> ( AuthState, Cmd Msg )
+updateRefresh region clientId state =
+    let
+        auth =
+            AuthState.untag state
+                |> .auth
+
+        authParams =
+            Dict.empty
+                |> Dict.insert "REFRESH_TOKEN" auth.refreshToken
+
+        authRequest =
+            CIP.initiateAuth
+                { userContextData = Nothing
+                , clientMetadata = Nothing
+                , clientId = clientId
+                , authParameters = Just authParams
+                , authFlow = CIP.AuthFlowTypeRefreshTokenAuth
+                , analyticsMetadata = Nothing
+                }
+
+        authCmd =
+            authRequest
+                |> AWS.Core.Http.sendUnsigned (CIP.service region)
+                |> Task.attempt InitiateAuthResponse
+    in
+    ( AuthState.toRefreshing state, authCmd )
+
+
 updateInitiateAuthResponse :
     Result.Result Http.Error CIP.InitiateAuthResponse
     -> AuthState.State { a | loggedIn : Allowed, failed : Allowed, challenged : Allowed } m
@@ -376,6 +417,24 @@ updateInitiateAuthResponse loginResult state =
 
                         ( _, _, _ ) ->
                             failed state
+
+                Just authResult ->
+                    handleAuthResult authResult state
+
+
+updateInitiateAuthResponseToRefresh :
+    Result.Result Http.Error CIP.InitiateAuthResponse
+    -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } m
+    -> ( AuthState, Cmd Msg )
+updateInitiateAuthResponseToRefresh loginResult state =
+    case Debug.log "loginResult" loginResult of
+        Err httpErr ->
+            failed state
+
+        Ok authResponse ->
+            case authResponse.authenticationResult of
+                Nothing ->
+                    failed state
 
                 Just authResult ->
                     handleAuthResult authResult state

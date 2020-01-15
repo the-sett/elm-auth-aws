@@ -73,7 +73,7 @@ type AuthState
     | Attempting (State { loggedIn : Allowed, failed : Allowed, challenged : Allowed } {})
     | Failed (State {} {})
     | LoggedIn (State { refreshing : Allowed } { auth : Authenticated })
-    | Refreshing (State { loggedIn : Allowed } { auth : Authenticated })
+    | Refreshing (State { loggedIn : Allowed, failed : Allowed } { auth : Authenticated })
     | Challenged (State { responding : Allowed, failed : Allowed } { challenge : ChallengeSpec })
     | Responding (State { loggedIn : Allowed, failed : Allowed, challenged : Allowed } { challenge : ChallengeSpec })
 
