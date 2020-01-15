@@ -13,7 +13,7 @@ module AuthState exposing
 
     , toAttempting
     , toFailed
-    , toLoggedInWithAuthenticated
+    , toLoggedIn
     , toRefreshing
     , toRestoring
     ,  untag
@@ -21,9 +21,10 @@ module AuthState exposing
 
     )
 
-import Jwt exposing (Token)
+import AWS.CognitoIdentityProvider as CIP
 import StateMachine exposing (Allowed, State(..), map)
 import Time exposing (Posix)
+import Tokens exposing (AccessToken, IdToken)
 
 
 untag : State tag value -> value
@@ -42,10 +43,20 @@ type alias Allowed =
 type alias Authenticated =
     { subject : String
     , scopes : List String
-    , token : String
-    , decodedToken : Token
+    , accessToken : String
+    , idToken : String
+    , decodedAccessToken : AccessToken
+    , decodedIdToken : IdToken
     , expiresAt : Posix
     , refreshFrom : Posix
+    }
+
+
+type alias ChallengeSpec =
+    { session : CIP.SessionType
+    , challenge : CIP.ChallengeNameType
+    , parameters : CIP.ChallengeParametersType
+    , username : String
     }
 
 
@@ -55,10 +66,11 @@ and is allowed from any state, so it is not marked explcitly here.
 type AuthState
     = LoggedOut (State { restoring : Allowed, attempting : Allowed } {})
     | Restoring (State { loggedIn : Allowed } {})
-    | Attempting (State { loggedIn : Allowed, failed : Allowed } {})
+    | Attempting (State { loggedIn : Allowed, failed : Allowed, challenged : Allowed } {})
     | Failed (State {} {})
     | LoggedIn (State { refreshing : Allowed } { auth : Authenticated })
     | Refreshing (State { loggedIn : Allowed } { auth : Authenticated })
+    | Challenged (State { loggedIn : Allowed, failed : Allowed, challenged : Allowed } { challenge : ChallengeSpec })
 
 
 
@@ -95,6 +107,11 @@ refreshing model =
     State { auth = model } |> Refreshing
 
 
+challenged : ChallengeSpec -> AuthState
+challenged model =
+    State { challenge = model } |> Challenged
+
+
 
 -- Map functions
 
@@ -104,12 +121,25 @@ mapAuth func =
     \model -> { model | auth = func model.auth }
 
 
+mapChallenge : (a -> a) -> ({ m | challenge : a } -> { m | challenge : a })
+mapChallenge func =
+    \model -> { model | challenge = func model.challenge }
+
+
 mapAuthenticated :
     (Authenticated -> Authenticated)
     -> State p { m | auth : Authenticated }
     -> State p { m | auth : Authenticated }
 mapAuthenticated func state =
     map (mapAuth func) state
+
+
+mapChallengeSpec :
+    (ChallengeSpec -> ChallengeSpec)
+    -> State p { m | challenge : ChallengeSpec }
+    -> State p { m | challenge : ChallengeSpec }
+mapChallengeSpec func state =
+    map (mapChallenge func) state
 
 
 
@@ -132,11 +162,16 @@ toFailed _ =
     failed
 
 
-toLoggedInWithAuthenticated : Authenticated -> State { a | loggedIn : Allowed } m -> AuthState
-toLoggedInWithAuthenticated authModel _ =
+toLoggedIn : Authenticated -> State { a | loggedIn : Allowed } m -> AuthState
+toLoggedIn authModel _ =
     loggedIn authModel
 
 
 toRefreshing : State { a | refreshing : Allowed } { m | auth : Authenticated } -> AuthState
 toRefreshing (State model) =
     refreshing model.auth
+
+
+toChallenged : ChallengeSpec -> State { a | challenged : Allowed } m -> AuthState
+toChallenged spec _ =
+    challenged spec

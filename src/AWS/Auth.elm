@@ -16,6 +16,7 @@ import AWS.Core.Credentials
 import AWS.Core.Http
 import AWS.Core.Service exposing (Region, Service)
 import AuthAPI exposing (AuthAPI, Credentials, Status(..))
+import AuthState
 import Dict exposing (Dict)
 import Http
 import Json.Decode as Decode exposing (Decoder)
