@@ -20,6 +20,7 @@ import AWS.CognitoIdentityProvider as CIP
 import AWS.Core.Credentials
 import AWS.Core.Http
 import AWS.Core.Service exposing (Region, Service)
+import AuthAPI exposing (AuthAPI, Credentials, Status(..))
 import Dict exposing (Dict)
 import Http
 import Jwt exposing (Token)
@@ -167,7 +168,7 @@ noop model =
     ( model, Cmd.none, Nothing )
 
 
-update : Msg -> Model -> ( Model, Cmd Msg, Maybe Status )
+update : Msg -> Model -> ( Model, Cmd Msg, Maybe (Status Challenge) )
 update msg model =
     case msg of
         LogIn credentials ->
@@ -191,7 +192,7 @@ update msg model =
             noop model
 
 
-updateLogin : Credentials -> Model -> ( Model, Cmd Msg, Maybe Status )
+updateLogin : Credentials -> Model -> ( Model, Cmd Msg, Maybe (Status Challenge) )
 updateLogin credentials model =
     let
         authParams =
@@ -221,7 +222,7 @@ updateChallengeResponse :
     { s | session : CIP.SessionType, challenge : CIP.ChallengeNameType, username : String }
     -> Dict String String
     -> Model
-    -> ( Model, Cmd Msg, Maybe Status )
+    -> ( Model, Cmd Msg, Maybe (Status Challenge) )
 updateChallengeResponse { session, challenge, username } responseParams model =
     let
         preparedParams =
@@ -248,7 +249,7 @@ updateChallengeResponse { session, challenge, username } responseParams model =
 updateInitiateAuthResponse :
     Result.Result Http.Error CIP.InitiateAuthResponse
     -> Model
-    -> ( Model, Cmd Msg, Maybe Status )
+    -> ( Model, Cmd Msg, Maybe (Status Challenge) )
 updateInitiateAuthResponse loginResult model =
     case Debug.log "loginResult" loginResult of
         Err httpErr ->
@@ -273,7 +274,7 @@ updateInitiateAuthResponse loginResult model =
                     handleAuthResult authResult model
 
 
-handleAuthResult : CIP.AuthenticationResultType -> Model -> ( Model, Cmd Msg, Maybe Status )
+handleAuthResult : CIP.AuthenticationResultType -> Model -> ( Model, Cmd Msg, Maybe (Status Challenge) )
 handleAuthResult authResult model =
     case ( authResult.refreshToken, authResult.idToken, authResult.accessToken ) of
         ( Just refreshToken, Just idToken, Just accessToken ) ->
@@ -310,7 +311,7 @@ handleChallenge :
     -> Dict String String
     -> CIP.ChallengeNameType
     -> Model
-    -> ( Model, Cmd Msg, Maybe Status )
+    -> ( Model, Cmd Msg, Maybe (Status Challenge) )
 handleChallenge session parameters challengeType model =
     let
         maybeUsername =
