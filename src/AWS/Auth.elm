@@ -269,6 +269,13 @@ statusChange oldAuthState newAuthState =
         ( LoggedOut, LoggedOut ) ->
             Nothing
 
+        ( Challenged oldSpec, Challenged newSpec ) ->
+            if oldSpec == newSpec then
+                Nothing
+
+            else
+                Just newStatus
+
         ( _, _ ) ->
             Just newStatus
 
