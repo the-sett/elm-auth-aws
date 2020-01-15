@@ -1,18 +1,13 @@
 module AWS.Auth exposing
-    ( Config
-    , login, refresh, logout, unauthed
-    , Model, Msg, init, update
-    , Challenge(..), requiredNewPassword
+    ( Config, Model, Msg
+    , api, Challenge(..), CognitoAPI
     )
 
 {-| Manages the state of the authentication process, and provides an API
 to request authentication operations.
 
-@docs Config
-@docs login, refresh, logout, unauthed
-@docs Model, Msg, init, update
-
-@docs Challenge, requiredNewPassword
+@docs Config, Model, Msg
+@docs api, Challenge, CognitoAPI
 
 -}
 
