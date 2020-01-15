@@ -1,5 +1,5 @@
 module AWS.Auth exposing
-    ( Config, Credentials, Status(..)
+    ( Config
     , login, refresh, logout, unauthed
     , Model, Msg, init, update
     , Challenge(..), requiredNewPassword
@@ -8,7 +8,7 @@ module AWS.Auth exposing
 {-| Manages the state of the authentication process, and provides an API
 to request authentication operations.
 
-@docs Config, Credentials, Status
+@docs Config
 @docs login, refresh, logout, unauthed
 @docs Model, Msg, init, update
 
@@ -33,7 +33,7 @@ import Task.Extra
 -- The Auth API implementation.
 
 
-api : AuthAPI Config Model Msg Never Challenge
+api : AuthAPI Config Model Msg Challenge {}
 api =
     { init = init
     , login = login
