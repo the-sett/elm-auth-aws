@@ -48,6 +48,7 @@ type alias Authenticated =
     , scopes : List String
     , accessToken : String
     , idToken : String
+    , refreshToken : String
     , decodedAccessToken : AccessToken
     , decodedIdToken : IdToken
     , expiresAt : Posix

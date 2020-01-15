@@ -389,27 +389,44 @@ handleAuthResult authResult state =
     case ( authResult.refreshToken, authResult.idToken, authResult.accessToken ) of
         ( Just refreshToken, Just idToken, Just accessToken ) ->
             let
-                _ =
+                rawRefreshToken =
+                    Refined.unbox CIP.tokenModelType refreshToken
+
+                rawAccessToken =
                     Refined.unbox CIP.tokenModelType accessToken
+
+                rawIdToken =
+                    Refined.unbox CIP.tokenModelType idToken
+
+                decodedAccessTokenResult =
+                    rawAccessToken
                         |> Jwt.decode Tokens.accessTokenDecoder
                         |> Debug.log "accessToken"
 
-                _ =
-                    Refined.unbox CIP.tokenModelType idToken
+                decodedIdTokenResult =
+                    rawIdToken
                         |> Jwt.decode Tokens.idTokenDecoder
                         |> Debug.log "idToken"
             in
-            -- ( AuthState.toLoggedIn
-            --     { refreshToken = refreshToken
-            --     , idToken = idToken
-            --     , accessToken = accessToken
-            --     }
-            --     state
-            -- , Cmd.none
-            -- , LoggedIn { scopes = [], subject = "" }
-            --     |> Just
-            -- )
-            failed state
+            case ( decodedAccessTokenResult, decodedIdTokenResult ) of
+                ( Ok decodedAccessToken, Ok decodedIdToken ) ->
+                    ( AuthState.toLoggedIn
+                        { subject = decodedAccessToken.sub
+                        , scopes = [ decodedAccessToken.scope ]
+                        , accessToken = rawAccessToken
+                        , idToken = rawIdToken
+                        , refreshToken = rawRefreshToken
+                        , decodedAccessToken = decodedAccessToken
+                        , decodedIdToken = decodedIdToken
+                        , expiresAt = decodedAccessToken.exp
+                        , refreshFrom = decodedAccessToken.exp
+                        }
+                        state
+                    , Cmd.none
+                    )
+
+                _ ->
+                    failed state
 
         _ ->
             failed state
