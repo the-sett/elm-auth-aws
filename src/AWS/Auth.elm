@@ -425,7 +425,7 @@ updateInitiateAuthResponse :
     -> AuthState.State { a | loggedIn : Allowed, failed : Allowed, challenged : Allowed } m
     -> ( AuthState, Cmd Msg )
 updateInitiateAuthResponse loginResult state =
-    case Debug.log "loginResult" loginResult of
+    case loginResult of
         Err httpErr ->
             failed state
 
@@ -468,12 +468,10 @@ handleAuthResult authResult state =
                 decodedAccessTokenResult =
                     rawAccessToken
                         |> Jwt.decode Tokens.accessTokenDecoder
-                        |> Debug.log "accessToken"
 
                 decodedIdTokenResult =
                     rawIdToken
                         |> Jwt.decode Tokens.idTokenDecoder
-                        |> Debug.log "idToken"
             in
             case ( decodedAccessTokenResult, decodedIdTokenResult ) of
                 ( Ok decodedAccessToken, Ok decodedIdToken ) ->
@@ -504,7 +502,7 @@ updateInitiateAuthResponseForRefresh :
     -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } { m | auth : Authenticated }
     -> ( AuthState, Cmd Msg )
 updateInitiateAuthResponseForRefresh loginResult state =
-    case Debug.log "loginResult" loginResult of
+    case loginResult of
         Err httpErr ->
             failed state
 
@@ -538,12 +536,10 @@ handleAuthResultForRefresh authResult state =
                 decodedAccessTokenResult =
                     rawAccessToken
                         |> Jwt.decode Tokens.accessTokenDecoder
-                        |> Debug.log "accessToken"
 
                 decodedIdTokenResult =
                     rawIdToken
                         |> Jwt.decode Tokens.idTokenDecoder
-                        |> Debug.log "idToken"
             in
             case ( decodedAccessTokenResult, decodedIdTokenResult ) of
                 ( Ok decodedAccessToken, Ok decodedIdToken ) ->

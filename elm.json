@@ -1,6 +1,6 @@
 {
     "type": "package",
-    "name": "the-sett/auth-elm",
+    "name": "the-sett/elm-auth-aws",
     "summary": "Elm auth module for interacting with the-sett/auth-service.",
     "license": "BSD-3-Clause",
     "version": "1.0.0",
