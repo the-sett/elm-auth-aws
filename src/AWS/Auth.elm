@@ -477,19 +477,21 @@ handleAuthResult authResult state =
             in
             case ( decodedAccessTokenResult, decodedIdTokenResult ) of
                 ( Ok decodedAccessToken, Ok decodedIdToken ) ->
-                    ( AuthState.toLoggedIn
-                        { subject = decodedAccessToken.sub
-                        , scopes = [ decodedAccessToken.scope ]
-                        , accessToken = accessToken
-                        , idToken = idToken
-                        , refreshToken = refreshToken
-                        , decodedAccessToken = decodedAccessToken
-                        , decodedIdToken = decodedIdToken
-                        , expiresAt = decodedAccessToken.exp
-                        , refreshFrom = decodedAccessToken.exp
-                        }
-                        state
-                    , Cmd.none
+                    let
+                        auth =
+                            { subject = decodedAccessToken.sub
+                            , scopes = [ decodedAccessToken.scope ]
+                            , accessToken = accessToken
+                            , idToken = idToken
+                            , refreshToken = refreshToken
+                            , decodedAccessToken = decodedAccessToken
+                            , decodedIdToken = decodedIdToken
+                            , expiresAt = decodedAccessToken.exp
+                            , refreshFrom = decodedAccessToken.exp
+                            }
+                    in
+                    ( AuthState.toLoggedIn auth state
+                    , delayedRefreshCmd auth
                     )
 
                 _ ->
@@ -557,7 +559,7 @@ handleAuthResultForRefresh authResult state =
                             , refreshFrom = decodedAccessToken.exp
                         }
                         state
-                    , Cmd.none
+                    , delayedRefreshCmd auth
                     )
 
                 _ ->
@@ -689,11 +691,9 @@ tokenExpiryTask timeout =
                 now =
                     Time.posixToMillis posixNow
             in
-            max ((by - now) // 2) (by - now - safeInterval)
-                |> max 0
+            max ((by - now) // 2) (by - now - safeInterval) |> max 0
     in
-    Time.now
-        |> Task.andThen (\now -> Process.sleep <| toFloat (delay timeout now))
+    Time.now |> Task.andThen (\now -> toFloat (delay timeout now) |> Process.sleep)
 
 
 
