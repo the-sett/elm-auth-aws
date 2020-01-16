@@ -11,6 +11,7 @@ to request authentication operations.
 
 -}
 
+import AWS.CognitoIdentity as CI
 import AWS.CognitoIdentityProvider as CIP
 import AWS.Core.Credentials
 import AWS.Core.Http
@@ -18,6 +19,7 @@ import AWS.Core.Service exposing (Region, Service)
 import AuthAPI exposing (AuthAPI, Credentials, Status(..))
 import AuthState exposing (Allowed, AuthState, Authenticated, ChallengeSpec)
 import Dict exposing (Dict)
+import Dict.Refined
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Extra exposing (andMap, withDefault)
@@ -47,15 +49,22 @@ api =
     , unauthed = unauthed
     , refresh = refresh
     , update = update
-    , requiredNewPassword = requiredNewPassword
     , addAuthHeaders = addAuthHeaders
+    , requiredNewPassword = requiredNewPassword
+    , getAWSCredentials = getAWSCredentials
     }
 
 
-{-| AWS Cognito specific API for responding to challenges.
+{-| AWS Cognito specific API for:
+
+  - Responding to challenges.
+  - Obtaining temporary AWS access credentials (for signing requests).
+
 -}
 type alias CognitoAPI =
-    { requiredNewPassword : String -> Cmd Msg }
+    { requiredNewPassword : String -> Cmd Msg
+    , getAWSCredentials : Model -> Maybe AWS.Core.Credentials.Credentials
+    }
 
 
 {-| The types of challenges that Cognito can issue.
@@ -78,11 +87,25 @@ type Challenge
 
 
 {-| The configuration needed to interact with Cognito.
+
+The `userIdentityMapping` field is optional. Fill it in and a request to obtain
+AWS credentials will be automatically made once logged in. That is to say that
+the user will be mapped to an AWS IAM identity, which can be used to access
+AWS services directly through request signing.
+
 -}
 type alias Config =
     { clientId : String
-    , userPoolId : String
     , region : Region
+    , userIdentityMapping : Maybe UserIdentityMapping
+    }
+
+
+{-| Optional configuration needed to request temporary AWS credentials.
+-}
+type alias UserIdentityMapping =
+    { userPoolId : String
+    , identityPoolId : String
     }
 
 
@@ -90,8 +113,8 @@ type alias Config =
 -}
 type alias Model =
     { clientId : CIP.ClientIdType
-    , userPoolId : String
     , region : Region
+    , userIdentityMapping : Maybe UserIdentityMapping
     , innerModel : Private
     }
 
@@ -110,9 +133,11 @@ type Msg
     | LogOut
     | NotAuthed
     | RespondToChallenge (Dict String String)
+    | RequestAWSCredentials UserIdentityMapping
     | InitiateAuthResponse (Result.Result Http.Error CIP.InitiateAuthResponse)
     | SignOutResponse (Result.Result Http.Error CIP.GlobalSignOutResponse)
     | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
+    | RequestAWSCredentialsResponse (Result.Result Http.Error CI.GetCredentialsForIdentityResponse)
 
 
 {-| Attempts to create an initialalized auth state from the configuration.
@@ -130,8 +155,8 @@ init config =
         Ok clientId ->
             Ok
                 { clientId = clientId
-                , userPoolId = config.userPoolId
                 , region = config.region
+                , userIdentityMapping = config.userIdentityMapping
                 , innerModel = Private AuthState.loggedOut
                 }
 
@@ -175,6 +200,11 @@ requiredNewPassword new =
                 |> Dict.insert "NEW_PASSWORD" new
     in
     RespondToChallenge challengeParams |> Task.Extra.message
+
+
+getAWSCredentials : Model -> Maybe AWS.Core.Credentials.Credentials
+getAWSCredentials _ =
+    Nothing
 
 
 
@@ -321,6 +351,12 @@ innerUpdate region clientId msg authState =
 
         ( RespondToChallengeResponse challengeResult, AuthState.Responding state ) ->
             updateRespondToChallengeResponse challengeResult state
+
+        ( RequestAWSCredentials userIdentityMapping, AuthState.LoggedIn state ) ->
+            ( AuthState.LoggedIn state, updateRequestAWSCredentials region userIdentityMapping state )
+
+        ( RequestAWSCredentials userIdentityMapping, AuthState.Refreshing state ) ->
+            ( AuthState.Refreshing state, updateRequestAWSCredentials region userIdentityMapping state )
 
         _ ->
             noop authState
@@ -655,6 +691,58 @@ updateRespondToChallengeResponse challengeResult state =
 
                 Just authResult ->
                     handleAuthResult authResult state
+
+
+updateRequestAWSCredentials :
+    Region
+    -> UserIdentityMapping
+    -> AuthState.State a { auth : Authenticated }
+    -> Cmd Msg
+updateRequestAWSCredentials region userIdentityMapping state =
+    let
+        auth =
+            AuthState.untag state
+                |> .auth
+
+        idToken =
+            Refined.unbox CIP.tokenModelType auth.idToken
+
+        idProviderString =
+            "cognito-idp." ++ region ++ ".amazonaws.com/" ++ userIdentityMapping.userPoolId
+
+        idProviderNameResult =
+            Refined.build CI.identityProviderName idProviderString
+
+        idProviderTokenResult =
+            Refined.build CI.identityProviderToken idToken
+
+        identityIdResult =
+            --Refined.build CI.identityId userIdentityMapping.identityPoolId
+            Err "Need to get an identity id first."
+    in
+    case ( identityIdResult, idProviderNameResult, idProviderTokenResult ) of
+        ( Ok identityId, Ok idProviderName, Ok idProviderToken ) ->
+            let
+                loginsMap =
+                    Refined.emptyDict CI.identityProviderName
+                        |> Dict.Refined.insert idProviderName idProviderToken
+
+                getCredentialsRequest =
+                    CI.getCredentialsForIdentity
+                        { logins = Just loginsMap
+                        , identityId = identityId
+                        , customRoleArn = Nothing
+                        }
+
+                credentialsCmd =
+                    getCredentialsRequest
+                        |> AWS.Core.Http.sendUnsigned (CI.service region)
+                        |> Task.attempt RequestAWSCredentialsResponse
+            in
+            credentialsCmd
+
+        _ ->
+            Cmd.none
 
 
 
