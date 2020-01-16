@@ -37,3 +37,11 @@ https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-scenarios.html
 Cognito can respond to an authentication attempt with a set of challenges that need to be completed in order to succesfully authenticate. For example, a new account may be forced to set up a new password on the first logon.
 
 The `CongitoAPI` provides functions for responding to such challenges, and the `Challenge` type lists all of the supported challenges.
+
+# Issues
+
+It does not seem possible to authenticate and get back custom scopes in the access token. The only scope given back when using the implicit flow through the Cognito API seems to be `aws.cognito.signin.user.admin`, whether you ask for it or not. An OAuth flow through either the hosted UI or a third party provider seems to be necessary to get custom scopes.
+
+It would be nice to do Oauth flows through third parties anyway. This seems sufficiently different that it would exist as a separate auth module in this package.
+
+To have a custom UI and make use of custom scopes, it seems necessary to implement your own auth server that support the OAuth flows through OpenIDConnect.

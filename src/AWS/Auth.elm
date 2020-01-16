@@ -106,6 +106,7 @@ type alias Config =
 type alias UserIdentityMapping =
     { userPoolId : String
     , identityPoolId : String
+    , accountId : String
     }
 
 
@@ -500,8 +501,16 @@ handleAuthResult authResult state =
                 rawAccessToken =
                     Refined.unbox CIP.tokenModelType accessToken
 
+                _ =
+                    Jwt.extractTokenBody rawAccessToken
+                        |> Debug.log "accessToken"
+
                 rawIdToken =
                     Refined.unbox CIP.tokenModelType idToken
+
+                _ =
+                    Jwt.extractTokenBody rawIdToken
+                        |> Debug.log "idToken"
 
                 decodedAccessTokenResult =
                     rawAccessToken
