@@ -297,7 +297,6 @@ update msg model =
 
 innerUpdate : Region -> CIP.ClientIdType -> Msg -> AuthState -> ( AuthState, Cmd Msg )
 innerUpdate region clientId msg authState =
-    -- | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
     case ( msg, authState ) of
         ( LogIn credentials, AuthState.LoggedOut state ) ->
             updateLogin region clientId credentials state
@@ -318,7 +317,10 @@ innerUpdate region clientId msg authState =
             updateInitiateAuthResponseForRefresh refreshResult state
 
         ( RespondToChallenge responseParams, AuthState.Challenged state ) ->
-            updateChallengeResponse region clientId responseParams state
+            updateRespondToChallenge region clientId responseParams state
+
+        ( RespondToChallengeResponse challengeResult, AuthState.Responding state ) ->
+            updateRespondToChallengeResponse challengeResult state
 
         _ ->
             noop authState
@@ -592,13 +594,13 @@ handleChallenge session parameters challengeType state =
             failed state
 
 
-updateChallengeResponse :
+updateRespondToChallenge :
     Region
     -> CIP.ClientIdType
     -> Dict String String
     -> AuthState.State { a | responding : Allowed, failed : Allowed } { m | challenge : ChallengeSpec }
     -> ( AuthState, Cmd Msg )
-updateChallengeResponse region clientId responseParams state =
+updateRespondToChallenge region clientId responseParams state =
     let
         challengeSpec =
             AuthState.untag state
@@ -623,6 +625,34 @@ updateChallengeResponse region clientId responseParams state =
                 |> Task.attempt RespondToChallengeResponse
     in
     ( AuthState.toResponding challengeSpec state, challengeCmd )
+
+
+updateRespondToChallengeResponse :
+    Result.Result Http.Error CIP.RespondToAuthChallengeResponse
+    -> AuthState.State { a | loggedIn : Allowed, challenged : Allowed, failed : Allowed } { m | challenge : ChallengeSpec }
+    -> ( AuthState, Cmd Msg )
+updateRespondToChallengeResponse challengeResult state =
+    case challengeResult of
+        Err httpErr ->
+            failed state
+
+        Ok authResponse ->
+            case authResponse.authenticationResult of
+                Nothing ->
+                    case
+                        ( authResponse.session
+                        , authResponse.challengeParameters
+                        , authResponse.challengeName
+                        )
+                    of
+                        ( Just session, Just parameters, Just challengeType ) ->
+                            handleChallenge session parameters challengeType state
+
+                        ( _, _, _ ) ->
+                            failed state
+
+                Just authResult ->
+                    handleAuthResult authResult state
 
 
 
