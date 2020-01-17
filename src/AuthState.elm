@@ -2,16 +2,10 @@ module AuthState exposing
     ( Allowed
     , AuthState(..)
     , Authenticated
-    ,  ChallengeSpec
-       -- Convenience re-exports from StateMachine
-
+    , ChallengeSpec
     , State
-    ,  loggedOut
-       -- Map
-
-    ,  mapAuthenticated
-       -- State transitions
-
+    , loggedOut
+    , mapAuthenticated
     , toAttempting
     , toChallenged
     , toFailed
@@ -19,9 +13,7 @@ module AuthState exposing
     , toRefreshing
     , toResponding
     , toRestoring
-    ,  untag
-       -- Constructors
-
+    , untag
     )
 
 import AWS.CognitoIdentity as CI
