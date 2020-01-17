@@ -360,7 +360,7 @@ innerUpdate region clientId userIdentityMapping msg authState =
             updateRefresh region clientId state
 
         ( InitiateAuthResponse loginResult, AuthState.Attempting state ) ->
-            updateInitiateAuthResponse loginResult userIdentityMapping state
+            updateInitiateAuthResponse loginResult region userIdentityMapping state
 
         ( InitiateAuthResponse refreshResult, AuthState.Refreshing state ) ->
             updateInitiateAuthResponseForRefresh refreshResult state
@@ -369,7 +369,7 @@ innerUpdate region clientId userIdentityMapping msg authState =
             updateRespondToChallenge region clientId responseParams state
 
         ( RespondToChallengeResponse challengeResult, AuthState.Responding state ) ->
-            updateRespondToChallengeResponse challengeResult userIdentityMapping state
+            updateRespondToChallengeResponse challengeResult region userIdentityMapping state
 
         _ ->
             noop authState
@@ -473,10 +473,11 @@ updateRefresh region clientId state =
 
 updateInitiateAuthResponse :
     Result.Result Http.Error CIP.InitiateAuthResponse
+    -> Region
     -> Maybe UserIdentityMapping
-    -> AuthState.State { a | loggedIn : Allowed, failed : Allowed, challenged : Allowed } m
+    -> AuthState.State { a | loggedIn : Allowed, requestingId : Allowed, failed : Allowed, challenged : Allowed } m
     -> ( AuthState, Cmd Msg )
-updateInitiateAuthResponse loginResult userIdentityMapping state =
+updateInitiateAuthResponse loginResult region userIdentityMapping state =
     case loginResult of
         Err httpErr ->
             failed state
@@ -497,15 +498,16 @@ updateInitiateAuthResponse loginResult userIdentityMapping state =
                             failed state
 
                 Just authResult ->
-                    handleAuthResult authResult userIdentityMapping state
+                    handleAuthResult authResult region userIdentityMapping state
 
 
 handleAuthResult :
     CIP.AuthenticationResultType
+    -> Region
     -> Maybe UserIdentityMapping
-    -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } m
+    -> AuthState.State { a | loggedIn : Allowed, requestingId : Allowed, failed : Allowed } m
     -> ( AuthState, Cmd Msg )
-handleAuthResult authResult userIdentityMapping state =
+handleAuthResult authResult region userIdentityMapping state =
     case ( authResult.refreshToken, authResult.idToken, authResult.accessToken ) of
         ( Just refreshToken, Just idToken, Just accessToken ) ->
             let
@@ -556,8 +558,15 @@ handleAuthResult authResult userIdentityMapping state =
                             )
 
                         Just idMappingConfig ->
-                            ( AuthState.toLoggedIn auth Nothing state
-                            , delayedRefreshCmd auth
+                            let
+                                requestingIdState =
+                                    AuthState.toRequestingId auth state
+                            in
+                            ( requestingIdState
+                            , Cmd.batch
+                                [ requestAWSCredentials region idMappingConfig auth
+                                , delayedRefreshCmd auth
+                                ]
                             )
 
                 _ ->
@@ -698,10 +707,11 @@ updateRespondToChallenge region clientId responseParams state =
 
 updateRespondToChallengeResponse :
     Result.Result Http.Error CIP.RespondToAuthChallengeResponse
+    -> Region
     -> Maybe UserIdentityMapping
-    -> AuthState.State { a | loggedIn : Allowed, challenged : Allowed, failed : Allowed } { m | challenge : ChallengeSpec }
+    -> AuthState.State { a | loggedIn : Allowed, requestingId : Allowed, challenged : Allowed, failed : Allowed } { m | challenge : ChallengeSpec }
     -> ( AuthState, Cmd Msg )
-updateRespondToChallengeResponse challengeResult userIdentityMapping state =
+updateRespondToChallengeResponse challengeResult region userIdentityMapping state =
     case challengeResult of
         Err httpErr ->
             failed state
@@ -722,20 +732,16 @@ updateRespondToChallengeResponse challengeResult userIdentityMapping state =
                             failed state
 
                 Just authResult ->
-                    handleAuthResult authResult userIdentityMapping state
+                    handleAuthResult authResult region userIdentityMapping state
 
 
 requestAWSCredentials :
     Region
     -> UserIdentityMapping
-    -> AuthState.State a { m | auth : Authenticated }
+    -> Authenticated
     -> Cmd Msg
-requestAWSCredentials region userIdentityMapping state =
+requestAWSCredentials region userIdentityMapping auth =
     let
-        auth =
-            AuthState.untag state
-                |> .auth
-
         idToken =
             Refined.unbox CIP.tokenModelType auth.idToken
 
@@ -749,10 +755,11 @@ requestAWSCredentials region userIdentityMapping state =
             Refined.build CI.identityProviderToken idToken
 
         identityIdResult =
-            --Refined.build CI.identityId userIdentityMapping.identityPoolId
-            Err "Need to get an identity id first."
+            Refined.build CI.identityId userIdentityMapping.identityPoolId
+
+        --Err "Need to get an identity id first."
     in
-    case ( identityIdResult, idProviderNameResult, idProviderTokenResult ) of
+    case Debug.log "params" ( identityIdResult, idProviderNameResult, idProviderTokenResult ) of
         ( Ok identityId, Ok idProviderName, Ok idProviderToken ) ->
             let
                 loginsMap =

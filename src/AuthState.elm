@@ -11,6 +11,8 @@ module AuthState exposing
     , toFailed
     , toLoggedIn
     , toRefreshing
+    , toRequestingCredentials
+    , toRequestingId
     , toResponding
     , toRestoring
     , untag
@@ -64,14 +66,14 @@ and is allowed from any state, so it is not marked explcitly here.
 type AuthState
     = LoggedOut (State { restoring : Allowed, attempting : Allowed } {})
     | Restoring (State { loggedIn : Allowed } {})
-    | Attempting (State { loggedIn : Allowed, failed : Allowed, requestingId : Allowed, challenged : Allowed } {})
-    | RequestingId (State { requestingCredentials : Allowed } { auth : Authenticated, id : CI.IdentityId })
-    | RequestingCredentials (State { loggedIn : Allowed } { auth : Authenticated, credentials : Credentials })
+    | Attempting (State { loggedIn : Allowed, requestingId : Allowed, failed : Allowed, challenged : Allowed } {})
+    | RequestingId (State { requestingCredentials : Allowed } { auth : Authenticated })
+    | RequestingCredentials (State { loggedIn : Allowed } { auth : Authenticated, id : CI.IdentityId })
     | Failed (State {} {})
     | LoggedIn (State { refreshing : Allowed, loggedOut : Allowed } { auth : Authenticated, credentials : Maybe Credentials })
     | Refreshing (State { loggedIn : Allowed } { auth : Authenticated })
     | Challenged (State { responding : Allowed } { challenge : ChallengeSpec })
-    | Responding (State { loggedIn : Allowed, failed : Allowed, challenged : Allowed } { challenge : ChallengeSpec })
+    | Responding (State { loggedIn : Allowed, requestingId : Allowed, failed : Allowed, challenged : Allowed } { challenge : ChallengeSpec })
 
 
 
@@ -93,14 +95,14 @@ attempting =
     State {} |> Attempting
 
 
-requestingId : Authenticated -> CI.IdentityId -> AuthState
-requestingId auth identityId =
-    State { auth = auth, id = identityId } |> RequestingId
+requestingId : Authenticated -> AuthState
+requestingId auth =
+    State { auth = auth } |> RequestingId
 
 
-requestingCredentials : Authenticated -> Credentials -> AuthState
-requestingCredentials auth credentials =
-    State { auth = auth, credentials = credentials } |> RequestingCredentials
+requestingCredentials : Authenticated -> CI.IdentityId -> AuthState
+requestingCredentials auth identityId =
+    State { auth = auth, id = identityId } |> RequestingCredentials
 
 
 failed : AuthState
@@ -173,14 +175,14 @@ toAttempting _ =
     attempting
 
 
-toRequestingId : Authenticated -> CI.IdentityId -> State { a | requestingId : Allowed } m -> AuthState
-toRequestingId auth identityId _ =
-    requestingId auth identityId
+toRequestingId : Authenticated -> State { a | requestingId : Allowed } m -> AuthState
+toRequestingId auth _ =
+    requestingId auth
 
 
-toRequestingCredentials : Authenticated -> Credentials -> State { a | requestingId : Allowed } m -> AuthState
-toRequestingCredentials auth credentials _ =
-    requestingCredentials auth credentials
+toRequestingCredentials : Authenticated -> CI.IdentityId -> State { a | requestingId : Allowed } m -> AuthState
+toRequestingCredentials auth identityId _ =
+    requestingCredentials auth identityId
 
 
 toFailed : State { a | failed : Allowed } m -> AuthState
