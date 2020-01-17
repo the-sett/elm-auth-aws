@@ -141,7 +141,6 @@ type Msg
     | LogOut
     | NotAuthed
     | RespondToChallenge (Dict String String)
-    | RequestAWSCredentials UserIdentityMapping
     | InitiateAuthResponse (Result.Result Http.Error CIP.InitiateAuthResponse)
     | SignOutResponse (Result.Result Http.Error CIP.GlobalSignOutResponse)
     | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
@@ -365,12 +364,6 @@ innerUpdate region clientId msg authState =
 
         ( RespondToChallengeResponse challengeResult, AuthState.Responding state ) ->
             updateRespondToChallengeResponse challengeResult state
-
-        ( RequestAWSCredentials userIdentityMapping, AuthState.LoggedIn state ) ->
-            ( AuthState.LoggedIn state, updateRequestAWSCredentials region userIdentityMapping state )
-
-        ( RequestAWSCredentials userIdentityMapping, AuthState.Refreshing state ) ->
-            ( AuthState.Refreshing state, updateRequestAWSCredentials region userIdentityMapping state )
 
         _ ->
             noop authState
