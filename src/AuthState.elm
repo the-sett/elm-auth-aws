@@ -101,6 +101,16 @@ attempting =
     State {} |> Attempting
 
 
+requestingId : Authenticated -> CI.IdentityId -> AuthState
+requestingId auth identityId =
+    State { auth = auth, id = identityId } |> RequestingId
+
+
+requestingCredentials : Authenticated -> Credentials -> AuthState
+requestingCredentials auth credentials =
+    State { auth = auth, credentials = credentials } |> RequestingCredentials
+
+
 failed : AuthState
 failed =
     State {} |> Failed
@@ -169,6 +179,16 @@ toRestoring _ =
 toAttempting : State { a | attempting : Allowed } m -> AuthState
 toAttempting _ =
     attempting
+
+
+toRequestingId : Authenticated -> CI.IdentityId -> State { a | requestingId : Allowed } m -> AuthState
+toRequestingId auth identityId _ =
+    requestingId auth identityId
+
+
+toRequestingCredentials : Authenticated -> Credentials -> State { a | requestingId : Allowed } m -> AuthState
+toRequestingCredentials auth credentials _ =
+    requestingCredentials auth credentials
 
 
 toFailed : State { a | failed : Allowed } m -> AuthState
