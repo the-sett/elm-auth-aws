@@ -242,7 +242,7 @@ setAuthState inner model =
 getStatus : AuthState -> Status AuthExtensions Challenge
 getStatus authState =
     let
-        extractAuth : AuthState.State p { auth : Authenticated } -> { scopes : List String, subject : String }
+        extractAuth : AuthState.State p { m | auth : Authenticated } -> { scopes : List String, subject : String }
         extractAuth state =
             let
                 authModel =
@@ -548,7 +548,7 @@ handleAuthResult authResult state =
                             , refreshFrom = decodedAccessToken.exp
                             }
                     in
-                    ( AuthState.toLoggedIn auth state
+                    ( AuthState.toLoggedIn auth Nothing state
                     , delayedRefreshCmd auth
                     )
 
@@ -616,6 +616,7 @@ handleAuthResultForRefresh authResult state =
                             , expiresAt = decodedAccessToken.exp
                             , refreshFrom = decodedAccessToken.exp
                         }
+                        Nothing
                         state
                     , delayedRefreshCmd auth
                     )
@@ -718,7 +719,7 @@ updateRespondToChallengeResponse challengeResult state =
 updateRequestAWSCredentials :
     Region
     -> UserIdentityMapping
-    -> AuthState.State a { auth : Authenticated }
+    -> AuthState.State a { m | auth : Authenticated }
     -> Cmd Msg
 updateRequestAWSCredentials region userIdentityMapping state =
     let

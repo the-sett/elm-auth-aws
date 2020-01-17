@@ -24,7 +24,9 @@ module AuthState exposing
 
     )
 
+import AWS.CognitoIdentity as CI
 import AWS.CognitoIdentityProvider as CIP
+import AWS.Core.Credentials exposing (Credentials)
 import StateMachine exposing (Allowed, State(..), map)
 import Time exposing (Posix)
 import Tokens exposing (AccessToken, IdToken)
@@ -71,10 +73,10 @@ type AuthState
     = LoggedOut (State { restoring : Allowed, attempting : Allowed } {})
     | Restoring (State { loggedIn : Allowed } {})
     | Attempting (State { loggedIn : Allowed, failed : Allowed, requestingId : Allowed, challenged : Allowed } {})
-    | RequestingId (State { requestingCredentials : Allowed } {})
-    | RequestingCredentials (State { loggedIn : Allowed } {})
+    | RequestingId (State { requestingCredentials : Allowed } { auth : Authenticated, id : CI.IdentityId })
+    | RequestingCredentials (State { loggedIn : Allowed } { auth : Authenticated, credentials : Credentials })
     | Failed (State {} {})
-    | LoggedIn (State { refreshing : Allowed, loggedOut : Allowed } { auth : Authenticated })
+    | LoggedIn (State { refreshing : Allowed, loggedOut : Allowed } { auth : Authenticated, credentials : Maybe Credentials })
     | Refreshing (State { loggedIn : Allowed } { auth : Authenticated })
     | Challenged (State { responding : Allowed } { challenge : ChallengeSpec })
     | Responding (State { loggedIn : Allowed, failed : Allowed, challenged : Allowed } { challenge : ChallengeSpec })
@@ -104,9 +106,9 @@ failed =
     State {} |> Failed
 
 
-loggedIn : Authenticated -> AuthState
-loggedIn model =
-    State { auth = model } |> LoggedIn
+loggedIn : Authenticated -> Maybe Credentials -> AuthState
+loggedIn model credentials =
+    State { auth = model, credentials = credentials } |> LoggedIn
 
 
 refreshing : Authenticated -> AuthState
@@ -174,9 +176,9 @@ toFailed _ =
     failed
 
 
-toLoggedIn : Authenticated -> State { a | loggedIn : Allowed } m -> AuthState
-toLoggedIn authModel _ =
-    loggedIn authModel
+toLoggedIn : Authenticated -> Maybe Credentials -> State { a | loggedIn : Allowed } m -> AuthState
+toLoggedIn authModel credentials _ =
+    loggedIn authModel credentials
 
 
 toRefreshing : State { a | refreshing : Allowed } { m | auth : Authenticated } -> AuthState
