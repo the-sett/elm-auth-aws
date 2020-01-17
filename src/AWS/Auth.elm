@@ -555,17 +555,17 @@ handleAuthResult authResult state =
 
 updateInitiateAuthResponseForRefresh :
     Result.Result Http.Error CIP.InitiateAuthResponse
-    -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } { m | auth : Authenticated }
+    -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated }
     -> ( AuthState, Cmd Msg )
 updateInitiateAuthResponseForRefresh loginResult state =
     case loginResult of
         Err httpErr ->
-            failed state
+            reset
 
         Ok authResponse ->
             case authResponse.authenticationResult of
                 Nothing ->
-                    failed state
+                    reset
 
                 Just authResult ->
                     handleAuthResultForRefresh authResult state
@@ -573,7 +573,7 @@ updateInitiateAuthResponseForRefresh loginResult state =
 
 handleAuthResultForRefresh :
     CIP.AuthenticationResultType
-    -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } { m | auth : Authenticated }
+    -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated }
     -> ( AuthState, Cmd Msg )
 handleAuthResultForRefresh authResult state =
     case ( authResult.idToken, authResult.accessToken ) of
@@ -615,10 +615,10 @@ handleAuthResultForRefresh authResult state =
                     )
 
                 _ ->
-                    failed state
+                    reset
 
         _ ->
-            failed state
+            reset
 
 
 handleChallenge :
@@ -652,7 +652,7 @@ updateRespondToChallenge :
     Region
     -> CIP.ClientIdType
     -> Dict String String
-    -> AuthState.State { a | responding : Allowed, failed : Allowed } { m | challenge : ChallengeSpec }
+    -> AuthState.State { a | responding : Allowed } { m | challenge : ChallengeSpec }
     -> ( AuthState, Cmd Msg )
 updateRespondToChallenge region clientId responseParams state =
     let
