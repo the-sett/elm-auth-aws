@@ -79,6 +79,9 @@ type AuthState
 
 
 
+-- | RequestingId (State { requestingCredentials : Allowed } {})
+-- | RequestingCredentials (State { idMapped : Allowed } {})
+-- | IdMapped (State {} { mappedId : MappedId })
 -- State constructors.
 
 
