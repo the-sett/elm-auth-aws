@@ -1,13 +1,13 @@
 module AWS.Auth exposing
     ( Config, Model, Msg
-    , api, Challenge(..), CognitoAPI
+    , api, AuthExtensions, Challenge(..), CognitoAPI
     )
 
 {-| Manages the state of the authentication process, and provides an API
 to request authentication operations.
 
 @docs Config, Model, Msg
-@docs api, Challenge, CognitoAPI
+@docs api, AuthExtensions, Challenge, CognitoAPI
 
 -}
 
@@ -41,7 +41,7 @@ import Tokens exposing (AccessToken, IdToken)
 This provides the functions needed to response to Cognito challenges.
 
 -}
-api : AuthAPI Config Model Msg Challenge CognitoAPI
+api : AuthAPI Config Model Msg AuthExtensions Challenge CognitoAPI
 api =
     { init = init
     , login = login
@@ -65,6 +65,13 @@ type alias CognitoAPI =
     { requiredNewPassword : String -> Cmd Msg
     , getAWSCredentials : Model -> Maybe AWS.Core.Credentials.Credentials
     }
+
+
+{-| Defines the extensions to the `AuthAPI.Authenticated` fields that this
+authenticator supports.
+-}
+type alias AuthExtensions =
+    {}
 
 
 {-| The types of challenges that Cognito can issue.
@@ -232,7 +239,7 @@ setAuthState inner model =
 
 {-| Extracts a summary view of the authentication status from the model.
 -}
-getStatus : AuthState -> Status Challenge
+getStatus : AuthState -> Status AuthExtensions Challenge
 getStatus authState =
     let
         extractAuth : AuthState.State p { auth : Authenticated } -> { scopes : List String, subject : String }
@@ -282,7 +289,7 @@ getStatus authState =
 {-| Compares two AuthStates and outputs the status of the newer one, if it differs
 from the older one, otherwise Nothing.
 -}
-statusChange : AuthState -> AuthState -> Maybe (Status Challenge)
+statusChange : AuthState -> AuthState -> Maybe (Status AuthExtensions Challenge)
 statusChange oldAuthState newAuthState =
     let
         oldStatus =
@@ -314,7 +321,7 @@ statusChange oldAuthState newAuthState =
 
 {-| Updates the model from Auth commands.
 -}
-update : Msg -> Model -> ( Model, Cmd Msg, Maybe (Status Challenge) )
+update : Msg -> Model -> ( Model, Cmd Msg, Maybe (Status AuthExtensions Challenge) )
 update msg model =
     let
         authState =
