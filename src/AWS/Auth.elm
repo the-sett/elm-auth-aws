@@ -270,6 +270,12 @@ getStatus authState =
         AuthState.Attempting _ ->
             LoggedOut
 
+        AuthState.RequestingId _ ->
+            LoggedOut
+
+        AuthState.RequestingCredentials _ ->
+            LoggedOut
+
         AuthState.Failed _ ->
             Failed
 

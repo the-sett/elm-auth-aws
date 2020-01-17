@@ -70,7 +70,9 @@ and is allowed from any state, so it is not marked explcitly here.
 type AuthState
     = LoggedOut (State { restoring : Allowed, attempting : Allowed } {})
     | Restoring (State { loggedIn : Allowed } {})
-    | Attempting (State { loggedIn : Allowed, failed : Allowed, challenged : Allowed } {})
+    | Attempting (State { loggedIn : Allowed, failed : Allowed, requestingId : Allowed, challenged : Allowed } {})
+    | RequestingId (State { requestingCredentials : Allowed } {})
+    | RequestingCredentials (State { loggedIn : Allowed } {})
     | Failed (State {} {})
     | LoggedIn (State { refreshing : Allowed, loggedOut : Allowed } { auth : Authenticated })
     | Refreshing (State { loggedIn : Allowed } { auth : Authenticated })
@@ -79,9 +81,6 @@ type AuthState
 
 
 
--- | RequestingId (State { requestingCredentials : Allowed } {})
--- | RequestingCredentials (State { idMapped : Allowed } {})
--- | IdMapped (State {} { mappedId : MappedId })
 -- State constructors.
 
 
