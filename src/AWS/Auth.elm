@@ -333,13 +333,19 @@ update msg model =
             getAuthState model
 
         ( newAuthState, cmds ) =
-            innerUpdate model.region model.clientId msg authState
+            innerUpdate model.region model.clientId model.userIdentityMapping msg authState
     in
     ( setAuthState newAuthState model, cmds, statusChange authState newAuthState )
 
 
-innerUpdate : Region -> CIP.ClientIdType -> Msg -> AuthState -> ( AuthState, Cmd Msg )
-innerUpdate region clientId msg authState =
+innerUpdate :
+    Region
+    -> CIP.ClientIdType
+    -> Maybe UserIdentityMapping
+    -> Msg
+    -> AuthState
+    -> ( AuthState, Cmd Msg )
+innerUpdate region clientId userIdentityMapping msg authState =
     case ( msg, authState ) of
         ( LogIn credentials, AuthState.LoggedOut state ) ->
             updateLogin region clientId credentials state
@@ -354,7 +360,7 @@ innerUpdate region clientId msg authState =
             updateRefresh region clientId state
 
         ( InitiateAuthResponse loginResult, AuthState.Attempting state ) ->
-            updateInitiateAuthResponse loginResult state
+            updateInitiateAuthResponse loginResult userIdentityMapping state
 
         ( InitiateAuthResponse refreshResult, AuthState.Refreshing state ) ->
             updateInitiateAuthResponseForRefresh refreshResult state
@@ -363,7 +369,7 @@ innerUpdate region clientId msg authState =
             updateRespondToChallenge region clientId responseParams state
 
         ( RespondToChallengeResponse challengeResult, AuthState.Responding state ) ->
-            updateRespondToChallengeResponse challengeResult state
+            updateRespondToChallengeResponse challengeResult userIdentityMapping state
 
         _ ->
             noop authState
@@ -467,9 +473,10 @@ updateRefresh region clientId state =
 
 updateInitiateAuthResponse :
     Result.Result Http.Error CIP.InitiateAuthResponse
+    -> Maybe UserIdentityMapping
     -> AuthState.State { a | loggedIn : Allowed, failed : Allowed, challenged : Allowed } m
     -> ( AuthState, Cmd Msg )
-updateInitiateAuthResponse loginResult state =
+updateInitiateAuthResponse loginResult userIdentityMapping state =
     case loginResult of
         Err httpErr ->
             failed state
@@ -490,14 +497,15 @@ updateInitiateAuthResponse loginResult state =
                             failed state
 
                 Just authResult ->
-                    handleAuthResult authResult state
+                    handleAuthResult authResult userIdentityMapping state
 
 
 handleAuthResult :
     CIP.AuthenticationResultType
+    -> Maybe UserIdentityMapping
     -> AuthState.State { a | loggedIn : Allowed, failed : Allowed } m
     -> ( AuthState, Cmd Msg )
-handleAuthResult authResult state =
+handleAuthResult authResult userIdentityMapping state =
     case ( authResult.refreshToken, authResult.idToken, authResult.accessToken ) of
         ( Just refreshToken, Just idToken, Just accessToken ) ->
             let
@@ -541,9 +549,16 @@ handleAuthResult authResult state =
                             , refreshFrom = decodedAccessToken.exp
                             }
                     in
-                    ( AuthState.toLoggedIn auth Nothing state
-                    , delayedRefreshCmd auth
-                    )
+                    case userIdentityMapping of
+                        Nothing ->
+                            ( AuthState.toLoggedIn auth Nothing state
+                            , delayedRefreshCmd auth
+                            )
+
+                        Just idMappingConfig ->
+                            ( AuthState.toLoggedIn auth Nothing state
+                            , delayedRefreshCmd auth
+                            )
 
                 _ ->
                     failed state
@@ -683,9 +698,10 @@ updateRespondToChallenge region clientId responseParams state =
 
 updateRespondToChallengeResponse :
     Result.Result Http.Error CIP.RespondToAuthChallengeResponse
+    -> Maybe UserIdentityMapping
     -> AuthState.State { a | loggedIn : Allowed, challenged : Allowed, failed : Allowed } { m | challenge : ChallengeSpec }
     -> ( AuthState, Cmd Msg )
-updateRespondToChallengeResponse challengeResult state =
+updateRespondToChallengeResponse challengeResult userIdentityMapping state =
     case challengeResult of
         Err httpErr ->
             failed state
@@ -706,15 +722,15 @@ updateRespondToChallengeResponse challengeResult state =
                             failed state
 
                 Just authResult ->
-                    handleAuthResult authResult state
+                    handleAuthResult authResult userIdentityMapping state
 
 
-updateRequestAWSCredentials :
+requestAWSCredentials :
     Region
     -> UserIdentityMapping
     -> AuthState.State a { m | auth : Authenticated }
     -> Cmd Msg
-updateRequestAWSCredentials region userIdentityMapping state =
+requestAWSCredentials region userIdentityMapping state =
     let
         auth =
             AuthState.untag state
