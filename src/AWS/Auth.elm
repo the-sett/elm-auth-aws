@@ -445,6 +445,9 @@ innerUpdate region clientId userIdentityMapping msg authState =
         ( RequestAWSIdentityResponse idResponse, AuthState.RequestingId state ) ->
             updateRequestAWSIdentityResponse region userIdentityMapping idResponse state
 
+        ( RequestAWSCredentialsResponse credentialsResponse, AuthState.RequestingCredentials state ) ->
+            updateRequestAWSCredentialsResponse credentialsResponse state
+
         _ ->
             noop authState
 
@@ -512,13 +515,17 @@ updateLogout region state =
 updateRefresh :
     Region
     -> CIP.ClientIdType
-    -> AuthState.State { a | refreshing : Allowed } { m | auth : Authenticated }
+    -> AuthState.State { a | refreshing : Allowed } { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials }
     -> ( AuthState, Cmd Msg )
 updateRefresh region clientId state =
     let
         auth =
             AuthState.untag state
                 |> .auth
+
+        credentials =
+            AuthState.untag state
+                |> .credentials
 
         refreshToken =
             Refined.unbox CIP.tokenModelType auth.refreshToken
@@ -542,7 +549,7 @@ updateRefresh region clientId state =
                 |> AWS.Core.Http.sendUnsigned (CIP.service region)
                 |> Task.attempt InitiateAuthResponse
     in
-    ( AuthState.toRefreshing state, authCmd )
+    ( AuthState.toRefreshing credentials state, authCmd )
 
 
 updateInitiateAuthResponse :
@@ -652,7 +659,7 @@ handleAuthResult authResult region userIdentityMapping state =
 
 updateInitiateAuthResponseForRefresh :
     Result.Result Http.Error CIP.InitiateAuthResponse
-    -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated }
+    -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials }
     -> ( AuthState, Cmd Msg )
 updateInitiateAuthResponseForRefresh loginResult state =
     case loginResult of
@@ -670,7 +677,7 @@ updateInitiateAuthResponseForRefresh loginResult state =
 
 handleAuthResultForRefresh :
     CIP.AuthenticationResultType
-    -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated }
+    -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials }
     -> ( AuthState, Cmd Msg )
 handleAuthResultForRefresh authResult state =
     case ( authResult.idToken, authResult.accessToken ) of
@@ -679,6 +686,10 @@ handleAuthResultForRefresh authResult state =
                 auth =
                     AuthState.untag state
                         |> .auth
+
+                credentials =
+                    AuthState.untag state
+                        |> .credentials
 
                 rawAccessToken =
                     Refined.unbox CIP.tokenModelType accessToken
@@ -707,7 +718,7 @@ handleAuthResultForRefresh authResult state =
                             , expiresAt = decodedAccessToken.exp
                             , refreshFrom = decodedAccessToken.exp
                         }
-                        Nothing
+                        credentials
                         state
                     , delayedRefreshCmd auth
                     )
@@ -911,6 +922,39 @@ requestAWSCredentials region userIdentityMapping identityId auth =
 
         _ ->
             Cmd.none
+
+
+updateRequestAWSCredentialsResponse :
+    Result Http.Error CI.GetCredentialsForIdentityResponse
+    -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated }
+    -> ( AuthState, Cmd Msg )
+updateRequestAWSCredentialsResponse credentialsResponseResult state =
+    case credentialsResponseResult of
+        Ok credentialsResponse ->
+            case credentialsResponse.credentials of
+                Just credentials ->
+                    let
+                        auth =
+                            AuthState.untag state
+                                |> .auth
+                    in
+                    case ( credentials.accessKeyId, credentials.secretKey, credentials.sessionToken ) of
+                        ( Just accessKeyId, Just secretKey, Just sessionToken ) ->
+                            let
+                                coreCredentials =
+                                    AWS.Core.Credentials.fromAccessKeys accessKeyId secretKey
+                                        |> AWS.Core.Credentials.setSessionToken sessionToken
+                            in
+                            ( AuthState.toLoggedIn auth (Just coreCredentials) state, Cmd.none )
+
+                        _ ->
+                            reset
+
+                _ ->
+                    reset
+
+        _ ->
+            reset
 
 
 

@@ -71,7 +71,7 @@ type AuthState
     | RequestingCredentials (State { loggedIn : Allowed } { auth : Authenticated, id : CI.IdentityId })
     | Failed (State {} {})
     | LoggedIn (State { refreshing : Allowed, loggedOut : Allowed } { auth : Authenticated, credentials : Maybe Credentials })
-    | Refreshing (State { loggedIn : Allowed } { auth : Authenticated })
+    | Refreshing (State { loggedIn : Allowed } { auth : Authenticated, credentials : Maybe Credentials })
     | Challenged (State { responding : Allowed } { challenge : ChallengeSpec })
     | Responding (State { loggedIn : Allowed, requestingId : Allowed, failed : Allowed, challenged : Allowed } { challenge : ChallengeSpec })
 
@@ -115,9 +115,9 @@ loggedIn model credentials =
     State { auth = model, credentials = credentials } |> LoggedIn
 
 
-refreshing : Authenticated -> AuthState
-refreshing model =
-    State { auth = model } |> Refreshing
+refreshing : Authenticated -> Maybe Credentials -> AuthState
+refreshing model credentials =
+    State { auth = model, credentials = credentials } |> Refreshing
 
 
 challenged : ChallengeSpec -> AuthState
@@ -195,9 +195,9 @@ toLoggedIn authModel credentials _ =
     loggedIn authModel credentials
 
 
-toRefreshing : State { a | refreshing : Allowed } { m | auth : Authenticated } -> AuthState
-toRefreshing (State model) =
-    refreshing model.auth
+toRefreshing : Maybe Credentials -> State { a | refreshing : Allowed } { m | auth : Authenticated } -> AuthState
+toRefreshing credentials (State model) =
+    refreshing model.auth credentials
 
 
 toChallenged : ChallengeSpec -> State { a | challenged : Allowed } m -> AuthState
