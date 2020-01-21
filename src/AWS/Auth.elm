@@ -104,13 +104,13 @@ AWS services directly through request signing.
 type alias Config =
     { clientId : String
     , region : Region
-    , userIdentityMapping : Maybe UserIdentityMapping
+    , userIdentityMapping : Maybe UserIdentityMappingConfig
     }
 
 
 {-| Optional configuration needed to request temporary AWS credentials.
 -}
-type alias UserIdentityMapping =
+type alias UserIdentityMappingConfig =
     { userPoolId : String
     , identityPoolId : String
     , accountId : String
@@ -124,6 +124,14 @@ type alias Model =
     , region : Region
     , userIdentityMapping : Maybe UserIdentityMapping
     , innerModel : Private
+    }
+
+
+type alias UserIdentityMapping =
+    { -- userPoolId : CI.UserPoolIdType
+      identityPoolId : CI.IdentityPoolId
+    , identityProviderName : CI.IdentityProviderName
+    , accountId : CI.AccountId
     }
 
 
@@ -144,6 +152,7 @@ type Msg
     | InitiateAuthResponse (Result.Result Http.Error CIP.InitiateAuthResponse)
     | SignOutResponse (Result.Result Http.Error CIP.GlobalSignOutResponse)
     | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
+    | RequestAWSIdentityResponse (Result.Result Http.Error CI.GetIdResponse)
     | RequestAWSCredentialsResponse (Result.Result Http.Error CI.GetCredentialsForIdentityResponse)
 
 
@@ -160,15 +169,71 @@ init config =
     in
     case clientIdResult of
         Ok clientId ->
-            Ok
-                { clientId = clientId
-                , region = config.region
-                , userIdentityMapping = config.userIdentityMapping
-                , innerModel = Private AuthState.loggedOut
-                }
+            case config.userIdentityMapping of
+                Nothing ->
+                    Ok
+                        { clientId = clientId
+                        , region = config.region
+                        , userIdentityMapping = Nothing
+                        , innerModel = Private AuthState.loggedOut
+                        }
+
+                Just userIdentityMapping ->
+                    let
+                        idMapping =
+                            initIdentityMapping config.region userIdentityMapping
+                    in
+                    case idMapping of
+                        Ok mapping ->
+                            Ok
+                                { clientId = clientId
+                                , region = config.region
+                                , userIdentityMapping = Just mapping
+                                , innerModel = Private AuthState.loggedOut
+                                }
+
+                        Err strErr ->
+                            Err strErr
 
         Err strErr ->
             "clientId " ++ Refined.stringErrorToString strErr |> Err
+
+
+initIdentityMapping : Region -> UserIdentityMappingConfig -> Result String UserIdentityMapping
+initIdentityMapping region userIdentityMapping =
+    let
+        idProviderString =
+            "cognito-idp." ++ region ++ ".amazonaws.com/" ++ userIdentityMapping.userPoolId
+
+        idProviderNameResult =
+            Refined.build CI.identityProviderName idProviderString
+
+        identityPoolIdResult =
+            Refined.build CI.identityPoolId userIdentityMapping.identityPoolId
+
+        accountIdResult =
+            Refined.build CI.accountId userIdentityMapping.accountId
+    in
+    case idProviderNameResult of
+        Ok idProviderName ->
+            case identityPoolIdResult of
+                Ok identityPoolId ->
+                    case accountIdResult of
+                        Ok accountId ->
+                            Ok
+                                { identityPoolId = identityPoolId
+                                , identityProviderName = idProviderName
+                                , accountId = accountId
+                                }
+
+                        Err strErr ->
+                            "accountId " ++ Refined.stringErrorToString strErr |> Err
+
+                Err strErr ->
+                    "identityPoolId " ++ Refined.stringErrorToString strErr |> Err
+
+        Err strErr ->
+            "userPoolId " ++ Refined.stringErrorToString strErr |> Err
 
 
 
@@ -564,7 +629,7 @@ handleAuthResult authResult region userIdentityMapping state =
                             in
                             ( requestingIdState
                             , Cmd.batch
-                                [ requestAWSCredentials region idMappingConfig auth
+                                [ requestAWSIdentity region idMappingConfig auth
                                 , delayedRefreshCmd auth
                                 ]
                             )
@@ -735,53 +800,94 @@ updateRespondToChallengeResponse challengeResult region userIdentityMapping stat
                     handleAuthResult authResult region userIdentityMapping state
 
 
+requestAWSIdentity :
+    Region
+    -> UserIdentityMapping
+    -> Authenticated
+    -> Cmd Msg
+requestAWSIdentity region userIdentityMapping auth =
+    let
+        idToken =
+            Refined.unbox CIP.tokenModelType auth.idToken
+
+        idProviderTokenResult =
+            Refined.build CI.identityProviderToken idToken
+
+        --Err "Need to get an identity id first."
+    in
+    case Debug.log "params" idProviderTokenResult of
+        Ok idProviderToken ->
+            let
+                loginsMap =
+                    Refined.emptyDict CI.identityProviderName
+                        |> Dict.Refined.insert userIdentityMapping.identityProviderName idProviderToken
+
+                getIdRequest =
+                    CI.getId
+                        { logins = Just loginsMap
+                        , identityPoolId = userIdentityMapping.identityPoolId
+                        , accountId = Just userIdentityMapping.accountId
+                        }
+
+                getIdCmd =
+                    getIdRequest
+                        |> AWS.Core.Http.sendUnsigned (CI.service region)
+                        |> Task.attempt RequestAWSIdentityResponse
+            in
+            getIdCmd
+
+        _ ->
+            Cmd.none
+
+
 requestAWSCredentials :
     Region
     -> UserIdentityMapping
     -> Authenticated
     -> Cmd Msg
 requestAWSCredentials region userIdentityMapping auth =
-    let
-        idToken =
-            Refined.unbox CIP.tokenModelType auth.idToken
-
-        idProviderString =
-            "cognito-idp." ++ region ++ ".amazonaws.com/" ++ userIdentityMapping.userPoolId
-
-        idProviderNameResult =
-            Refined.build CI.identityProviderName idProviderString
-
-        idProviderTokenResult =
-            Refined.build CI.identityProviderToken idToken
-
-        identityIdResult =
-            Refined.build CI.identityId userIdentityMapping.identityPoolId
-
-        --Err "Need to get an identity id first."
-    in
-    case Debug.log "params" ( identityIdResult, idProviderNameResult, idProviderTokenResult ) of
-        ( Ok identityId, Ok idProviderName, Ok idProviderToken ) ->
-            let
-                loginsMap =
-                    Refined.emptyDict CI.identityProviderName
-                        |> Dict.Refined.insert idProviderName idProviderToken
-
-                getCredentialsRequest =
-                    CI.getCredentialsForIdentity
-                        { logins = Just loginsMap
-                        , identityId = identityId
-                        , customRoleArn = Nothing
-                        }
-
-                credentialsCmd =
-                    getCredentialsRequest
-                        |> AWS.Core.Http.sendUnsigned (CI.service region)
-                        |> Task.attempt RequestAWSCredentialsResponse
-            in
-            credentialsCmd
-
-        _ ->
-            Cmd.none
+    -- let
+    --     idToken =
+    --         Refined.unbox CIP.tokenModelType auth.idToken
+    --
+    --     idProviderString =
+    --         "cognito-idp." ++ region ++ ".amazonaws.com/" ++ userIdentityMapping.userPoolId
+    --
+    --     idProviderNameResult =
+    --         Refined.build CI.identityProviderName idProviderString
+    --
+    --     idProviderTokenResult =
+    --         Refined.build CI.identityProviderToken idToken
+    --
+    --     identityIdResult =
+    --         Refined.build CI.identityId userIdentityMapping.identityPoolId
+    --
+    --     --Err "Need to get an identity id first."
+    -- in
+    -- case Debug.log "params" ( identityIdResult, idProviderNameResult, idProviderTokenResult ) of
+    --     ( Ok identityId, Ok idProviderName, Ok idProviderToken ) ->
+    --         let
+    --             loginsMap =
+    --                 Refined.emptyDict CI.identityProviderName
+    --                     |> Dict.Refined.insert idProviderName idProviderToken
+    --
+    --             getCredentialsRequest =
+    --                 CI.getCredentialsForIdentity
+    --                     { logins = Just loginsMap
+    --                     , identityId = identityId
+    --                     , customRoleArn = Nothing
+    --                     }
+    --
+    --             credentialsCmd =
+    --                 getCredentialsRequest
+    --                     |> AWS.Core.Http.sendUnsigned (CI.service region)
+    --                     |> Task.attempt RequestAWSCredentialsResponse
+    --         in
+    --         credentialsCmd
+    --
+    --     _ ->
+    --         Cmd.none
+    Cmd.none
 
 
 
