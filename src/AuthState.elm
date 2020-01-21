@@ -180,7 +180,7 @@ toRequestingId auth _ =
     requestingId auth
 
 
-toRequestingCredentials : Authenticated -> CI.IdentityId -> State { a | requestingId : Allowed } m -> AuthState
+toRequestingCredentials : Authenticated -> CI.IdentityId -> State { a | requestingCredentials : Allowed } m -> AuthState
 toRequestingCredentials auth identityId _ =
     requestingCredentials auth identityId
 
