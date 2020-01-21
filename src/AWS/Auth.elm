@@ -219,8 +219,7 @@ initIdentityMapping region userIdentityMapping =
         Ok idProviderName ->
             let
                 _ =
-                    (Refined.encoder CI.identityProviderName idProviderName |> Encode.encode 0)
-                        |> Debug.log "provider"
+                    Refined.encoder CI.identityProviderName idProviderName |> Encode.encode 0
             in
             case identityPoolIdResult of
                 Ok identityPoolId ->
@@ -228,7 +227,7 @@ initIdentityMapping region userIdentityMapping =
                         Ok accountId ->
                             Ok
                                 { identityPoolId = identityPoolId
-                                , identityProviderName = Debug.log "providerName" idProviderName
+                                , identityProviderName = idProviderName
                                 , accountId = accountId
                                 }
 
@@ -617,16 +616,8 @@ handleAuthResult authResult region userIdentityMapping state =
                 rawAccessToken =
                     Refined.unbox CIP.tokenModelType accessToken
 
-                _ =
-                    Jwt.extractTokenBody rawAccessToken
-                        |> Debug.log "accessToken"
-
                 rawIdToken =
                     Refined.unbox CIP.tokenModelType idToken
-
-                _ =
-                    Jwt.extractTokenBody rawIdToken
-                        |> Debug.log "idToken"
 
                 decodedAccessTokenResult =
                     rawAccessToken
@@ -852,7 +843,7 @@ requestAWSIdentity region userIdentityMapping auth =
         idProviderTokenResult =
             Refined.build CI.identityProviderToken idToken
     in
-    case Debug.log "params" idProviderTokenResult of
+    case idProviderTokenResult of
         Ok idProviderToken ->
             let
                 loginsMap =
@@ -861,7 +852,7 @@ requestAWSIdentity region userIdentityMapping auth =
 
                 getIdRequest =
                     CI.getId
-                        { logins = Debug.log "logins" (Just loginsMap)
+                        { logins = Just loginsMap
                         , identityPoolId = userIdentityMapping.identityPoolId
                         , accountId = Just userIdentityMapping.accountId
                         }
@@ -918,7 +909,7 @@ requestAWSCredentials region userIdentityMapping identityId auth =
         idProviderTokenResult =
             Refined.build CI.identityProviderToken idToken
     in
-    case Debug.log "params" idProviderTokenResult of
+    case idProviderTokenResult of
         Ok idProviderToken ->
             let
                 loginsMap =
