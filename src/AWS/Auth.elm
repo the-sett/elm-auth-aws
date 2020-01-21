@@ -280,9 +280,28 @@ requiredNewPassword new =
     RespondToChallenge challengeParams |> Task.Extra.message
 
 
+{-| When in the `LoggedIn` state and if 'user id mapping' was requested by
+providing a value for `Config.userIdentityMapping`, this will return the
+AWS access credentials that were fetched from a Cognito Identity pool duing
+the log in process.
+-}
 getAWSCredentials : Model -> Maybe AWS.Core.Credentials.Credentials
-getAWSCredentials _ =
-    Nothing
+getAWSCredentials model =
+    let
+        tryGetCredentials state =
+            AuthState.untag state |> .credentials
+    in
+    case model.innerModel of
+        Private authState ->
+            case authState of
+                AuthState.LoggedIn state ->
+                    tryGetCredentials state
+
+                AuthState.Refreshing state ->
+                    tryGetCredentials state
+
+                _ ->
+                    Nothing
 
 
 
