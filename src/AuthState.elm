@@ -21,9 +21,9 @@ module AuthState exposing
 import AWS.CognitoIdentity as CI
 import AWS.CognitoIdentityProvider as CIP
 import AWS.Core.Credentials exposing (Credentials)
+import AWS.Tokens exposing (AccessToken, IdToken)
 import StateMachine exposing (Allowed, State(..), map)
 import Time exposing (Posix)
-import Tokens exposing (AccessToken, IdToken)
 
 
 untag : State tag value -> value

@@ -16,6 +16,7 @@ import AWS.CognitoIdentityProvider as CIP
 import AWS.Core.Credentials
 import AWS.Core.Http
 import AWS.Core.Service exposing (Region, Service)
+import AWS.Tokens exposing (AccessToken, IdToken)
 import AuthAPI exposing (AuthAPI, Credentials, Status(..))
 import AuthState exposing (Allowed, AuthState, Authenticated, ChallengeSpec)
 import Dict exposing (Dict)
@@ -30,7 +31,6 @@ import Refined
 import Task
 import Task.Extra
 import Time exposing (Posix)
-import Tokens exposing (AccessToken, IdToken)
 
 
 
@@ -629,11 +629,11 @@ handleAuthResult authResult region userIdentityMapping state =
 
                 decodedAccessTokenResult =
                     rawAccessToken
-                        |> Jwt.decode Tokens.accessTokenDecoder
+                        |> Jwt.decode accessTokenDecoder
 
                 decodedIdTokenResult =
                     rawIdToken
-                        |> Jwt.decode Tokens.idTokenDecoder
+                        |> Jwt.decode idTokenDecoder
             in
             case ( decodedAccessTokenResult, decodedIdTokenResult ) of
                 ( Ok decodedAccessToken, Ok decodedIdToken ) ->
@@ -717,11 +717,11 @@ handleAuthResultForRefresh authResult state =
 
                 decodedAccessTokenResult =
                     rawAccessToken
-                        |> Jwt.decode Tokens.accessTokenDecoder
+                        |> Jwt.decode accessTokenDecoder
 
                 decodedIdTokenResult =
                     rawIdToken
-                        |> Jwt.decode Tokens.idTokenDecoder
+                        |> Jwt.decode idTokenDecoder
             in
             case ( decodedAccessTokenResult, decodedIdTokenResult ) of
                 ( Ok decodedAccessToken, Ok decodedIdToken ) ->
@@ -1078,3 +1078,47 @@ getAuthenticated model =
 
                 _ ->
                     Nothing
+
+
+
+-- Decoders
+
+
+accessTokenDecoder : Decoder AccessToken
+accessTokenDecoder =
+    Decode.succeed AccessToken
+        |> andMap (Decode.field "sub" Decode.string)
+        |> andMap (Decode.field "event_id" Decode.string)
+        |> andMap (Decode.field "token_use" Decode.string)
+        |> andMap (Decode.field "scope" Decode.string)
+        |> andMap (Decode.field "auth_time" decodePosix)
+        |> andMap (Decode.field "iss" Decode.string)
+        |> andMap (Decode.field "exp" decodePosix)
+        |> andMap (Decode.field "iat" decodePosix)
+        |> andMap (Decode.field "jti" Decode.string)
+        |> andMap (Decode.field "client_id" Decode.string)
+        |> andMap (Decode.field "username" Decode.string)
+
+
+idTokenDecoder : Decoder IdToken
+idTokenDecoder =
+    Decode.succeed IdToken
+        |> andMap (Decode.field "sub" Decode.string)
+        |> andMap (Decode.field "aud" Decode.string)
+        |> andMap (Decode.field "event_id" Decode.string)
+        |> andMap (Decode.field "token_use" Decode.string)
+        |> andMap (Decode.field "auth_time" decodePosix)
+        |> andMap (Decode.field "iss" Decode.string)
+        |> andMap (Decode.field "cognito:username" Decode.string)
+        |> andMap (Decode.field "exp" decodePosix)
+        |> andMap (Decode.field "iat" decodePosix)
+        |> andMap (Decode.field "email" Decode.string)
+
+
+{-| Decodes an integer as a posix timestamp.
+-}
+decodePosix : Decoder Posix
+decodePosix =
+    Decode.map
+        (Time.millisToPosix << (*) 1000)
+        Decode.int
