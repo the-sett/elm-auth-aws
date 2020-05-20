@@ -41,6 +41,13 @@ import Time exposing (Posix)
 
 This provides the functions needed to response to Cognito challenges.
 
+Note that this API, extends the base API defined in the `the-sett/elm-auth` package.
+
+The `addAuthHeaders` function, adds an `Authorization : Bearer XXXX` header into
+any set of HTTP headers given to it. Alternatively the extended `CognitoAPI` can
+be used to obtain the raw access directly, if it needs to be used in a different
+way.
+
 -}
 api : AuthAPI Config Model Msg AuthExtensions Challenge CognitoAPI
 api =
@@ -64,6 +71,7 @@ api =
 
   - Responding to challenges.
   - Obtaining temporary AWS access credentials (for signing requests).
+  - Obtaining the raw or decoded id and access tokens.
 
 -}
 type alias CognitoAPI =
