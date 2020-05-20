@@ -53,6 +53,10 @@ api =
     , addAuthHeaders = addAuthHeaders
     , requiredNewPassword = requiredNewPassword
     , getAWSCredentials = getAWSCredentials
+    , getAccessToken = getAccessToken
+    , getDecodedAccessToken = getDecodedAccessToken
+    , getIdToken = getIdToken
+    , getDecodedIdToken = getDecodedIdToken
     }
 
 
@@ -65,6 +69,10 @@ api =
 type alias CognitoAPI =
     { requiredNewPassword : String -> Cmd Msg
     , getAWSCredentials : Model -> Maybe AWS.Core.Credentials.Credentials
+    , getAccessToken : Model -> Maybe String
+    , getDecodedAccessToken : Model -> Maybe AccessToken
+    , getIdToken : Model -> Maybe String
+    , getDecodedIdToken : Model -> Maybe IdToken
     }
 
 
@@ -1010,6 +1018,63 @@ tokenExpiryTask timeout =
 -- Authorising HTTP requests.
 
 
-addAuthHeaders : model -> List Http.Header -> List Http.Header
+addAuthHeaders : Model -> List Http.Header -> List Http.Header
 addAuthHeaders model headers =
-    headers
+    case getAccessToken model of
+        Nothing ->
+            headers
+
+        Just val ->
+            Http.header "Authorization" ("Bearer " ++ val)
+                :: headers
+
+
+getAccessToken : Model -> Maybe String
+getAccessToken model =
+    getAuthenticated model
+        |> Maybe.map .accessToken
+        |> Maybe.map (Refined.unbox CIP.tokenModelType)
+
+
+getDecodedAccessToken : Model -> Maybe AccessToken
+getDecodedAccessToken model =
+    getAuthenticated model
+        |> Maybe.map .decodedAccessToken
+
+
+getIdToken : Model -> Maybe String
+getIdToken model =
+    getAuthenticated model
+        |> Maybe.map .idToken
+        |> Maybe.map (Refined.unbox CIP.tokenModelType)
+
+
+getDecodedIdToken : Model -> Maybe IdToken
+getDecodedIdToken model =
+    getAuthenticated model
+        |> Maybe.map .decodedIdToken
+
+
+getAuthenticated : Model -> Maybe Authenticated
+getAuthenticated model =
+    let
+        tryGetAuthenticated state =
+            AuthState.untag state |> .auth
+    in
+    case model.innerModel of
+        Private authState ->
+            case authState of
+                AuthState.LoggedIn state ->
+                    tryGetAuthenticated state |> Just
+
+                AuthState.Refreshing state ->
+                    tryGetAuthenticated state |> Just
+
+                AuthState.RequestingId state ->
+                    tryGetAuthenticated state |> Just
+
+                AuthState.RequestingCredentials state ->
+                    tryGetAuthenticated state |> Just
+
+                _ ->
+                    Nothing
