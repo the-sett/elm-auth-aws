@@ -124,11 +124,24 @@ AWS credentials will be automatically made once logged in. That is to say that
 the user will be mapped to an AWS IAM identity, which can be used to access
 AWS services directly through request signing.
 
+The `authHeaderName` field provides the name of the field into which the
+`AuthAPI.addAuthHeaders` function will set the authentication token. Almost
+always the `Authorization` header field is used.
+
+The 'authHeaderPrefix' may provide a string with which the access token value is
+prefixed in the header field. Patterns like 'Bearer XXX' or 'Token XXX' are common.
+Note that the space will be automatically inserted between then prefix and the
+token, if a prefix is provided - so `authHeaderPrefix = "Bearer"` will yield
+`Bearer XXX`. If no prefix is provided just the token on its own will be set in
+the header field.
+
 -}
 type alias Config =
     { clientId : String
     , region : Region
     , userIdentityMapping : Maybe UserIdentityMappingConfig
+    , authHeaderName : String
+    , authHeaderPrefix : Maybe String
     }
 
 
@@ -147,6 +160,8 @@ type alias Model =
     { clientId : CIP.ClientIdType
     , region : Region
     , userIdentityMapping : Maybe UserIdentityMapping
+    , authHeaderName : String
+    , authHeaderPrefix : Maybe String
     , innerModel : Private
     }
 
@@ -217,6 +232,8 @@ init config =
                         , region = config.region
                         , userIdentityMapping = Nothing
                         , innerModel = Private AuthState.loggedOut
+                        , authHeaderName = config.authHeaderName
+                        , authHeaderPrefix = config.authHeaderPrefix
                         }
 
                 Just userIdentityMapping ->
@@ -231,6 +248,8 @@ init config =
                                 , region = config.region
                                 , userIdentityMapping = Just mapping
                                 , innerModel = Private AuthState.loggedOut
+                                , authHeaderName = config.authHeaderName
+                                , authHeaderPrefix = config.authHeaderPrefix
                                 }
 
                         Err strErr ->
@@ -1069,8 +1088,14 @@ addAuthHeaders model headers =
             headers
 
         Just val ->
-            Http.header "Authorization" ("Bearer " ++ val)
-                :: headers
+            case model.authHeaderPrefix of
+                Nothing ->
+                    Http.header model.authHeaderName val
+                        :: headers
+
+                Just prefix ->
+                    Http.header model.authHeaderName (prefix ++ " " ++ val)
+                        :: headers
 
 
 getAccessToken : Model -> Maybe String
