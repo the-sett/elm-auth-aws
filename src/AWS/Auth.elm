@@ -24,7 +24,7 @@ import Dict.Refined
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Extra exposing (andMap, withDefault)
-import Json.Encode as Encode
+import Json.Encode as Encode exposing (Value)
 import Jwt
 import Process
 import Refined
@@ -60,10 +60,6 @@ api =
     , addAuthHeaders = addAuthHeaders
     , requiredNewPassword = requiredNewPassword
     , getAWSCredentials = getAWSCredentials
-    , getAccessToken = getAccessToken
-    , getDecodedAccessToken = getDecodedAccessToken
-    , getIdToken = getIdToken
-    , getDecodedIdToken = getDecodedIdToken
     }
 
 
@@ -77,18 +73,28 @@ api =
 type alias CognitoAPI =
     { requiredNewPassword : String -> Cmd Msg
     , getAWSCredentials : Model -> Maybe AWS.Core.Credentials.Credentials
-    , getAccessToken : Model -> Maybe String
-    , getDecodedAccessToken : Model -> Maybe AccessToken
-    , getIdToken : Model -> Maybe String
-    , getDecodedIdToken : Model -> Maybe IdToken
+    , restore : Value -> Result String Model
     }
 
 
-{-| Defines the extensions to the `AuthAPI.Authenticated` fields that this
+{-| Defines the extensions to the `AuthAPI.AuthInfo` fields that this
 authenticator supports.
+
+`saveState` provides a JSON serialized snapshot of the authenticated state. This
+can be used with the `CognitoAPI.restore` function to attempt to re-create the
+authenticated state without logging in again. Be aware that the save state will
+contain sensitive information such as access tokens - so think carefully about
+the security implications of where you put it. For example, local storage can be
+compromised by XSS attacks, are you really sure your site is invulnerable to this?
+
 -}
 type alias AuthExtensions =
-    {}
+    { accessToken : String
+    , decodedAccessToken : AccessToken
+    , idToken : String
+    , decodedIdToken : IdToken
+    , saveState : Value
+    }
 
 
 {-| The types of challenges that Cognito can issue.
@@ -149,6 +155,23 @@ type alias UserIdentityMapping =
       identityPoolId : CI.IdentityPoolId
     , identityProviderName : CI.IdentityProviderName
     , accountId : CI.AccountId
+    }
+
+
+{-| The save state when LoggedIn. This can potentially be used to restore the
+LoggedIn state.
+-}
+type alias SaveState =
+    { clientId : CIP.ClientIdType
+    , region : Region
+    , accessToken : String
+    , idToken : String
+    , refreshToken : String
+    , userIdentity :
+        Maybe
+            { mapping : UserIdentityMapping
+            , credentials : Credentials
+            }
     }
 
 
@@ -1130,3 +1153,22 @@ decodePosix =
     Decode.map
         (Time.millisToPosix << (*) 1000)
         Decode.int
+
+
+rawTokensToAuth : String -> String -> String -> Result String Authenticated
+rawTokensToAuth rawAccessToken rawIdToken rawRefreshToken =
+    Result.map5
+        (\accessToken idToken refreshToken decodedAccessToken decodedIdToken ->
+            { subject = decodedAccessToken.sub
+            , scopes = [ decodedAccessToken.scope ]
+            , accessToken = accessToken
+            , idToken = idToken
+            , refreshToken = refreshToken
+            , decodedAccessToken = decodedAccessToken
+            , decodedIdToken = decodedIdToken
+            , expiresAt = decodedAccessToken.exp
+            , refreshFrom = decodedAccessToken.exp
+            }
+        )
+        (rawAccessToken |> Jwt.decode accessTokenDecoder)
+        (rawIdToken |> Jwt.decode idTokenDecoder)
