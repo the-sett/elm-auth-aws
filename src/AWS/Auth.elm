@@ -17,7 +17,7 @@ import AWS.Core.Credentials
 import AWS.Core.Http
 import AWS.Core.Service exposing (Region, Service)
 import AWS.Tokens exposing (AccessToken, IdToken)
-import AuthAPI exposing (AuthAPI, Credentials, Status(..))
+import AuthAPI exposing (AuthAPI, AuthInfo, Credentials, Status(..))
 import AuthState exposing (Allowed, AuthState, Authenticated, ChallengeSpec)
 import Dict exposing (Dict)
 import Dict.Refined
@@ -60,6 +60,7 @@ api =
     , addAuthHeaders = addAuthHeaders
     , requiredNewPassword = requiredNewPassword
     , getAWSCredentials = getAWSCredentials
+    , restore = restore
     }
 
 
@@ -342,6 +343,11 @@ getAWSCredentials model =
                     Nothing
 
 
+restore : Value -> Result String Model
+restore _ =
+    Err "todo"
+
+
 
 -- Processing of auth related requests and internal auth state.
 
@@ -369,13 +375,20 @@ setAuthState inner model =
 getStatus : AuthState -> Status AuthExtensions Challenge
 getStatus authState =
     let
-        extractAuth : AuthState.State p { m | auth : Authenticated } -> { scopes : List String, subject : String }
+        extractAuth : AuthState.State p { m | auth : Authenticated } -> AuthInfo AuthExtensions
         extractAuth state =
             let
                 authModel =
                     AuthState.untag state
             in
-            { scopes = authModel.auth.scopes, subject = authModel.auth.subject }
+            { scopes = authModel.auth.scopes
+            , subject = authModel.auth.subject
+            , accessToken = Refined.unbox CIP.tokenModelType authModel.auth.accessToken
+            , decodedAccessToken = authModel.auth.decodedAccessToken
+            , idToken = Refined.unbox CIP.tokenModelType authModel.auth.idToken
+            , decodedIdToken = authModel.auth.decodedIdToken
+            , saveState = Encode.string "todo"
+            }
 
         extractChallenge : AuthState.State p { challenge : ChallengeSpec } -> Challenge
         extractChallenge state =
@@ -1155,20 +1168,21 @@ decodePosix =
         Decode.int
 
 
-rawTokensToAuth : String -> String -> String -> Result String Authenticated
-rawTokensToAuth rawAccessToken rawIdToken rawRefreshToken =
-    Result.map5
-        (\accessToken idToken refreshToken decodedAccessToken decodedIdToken ->
-            { subject = decodedAccessToken.sub
-            , scopes = [ decodedAccessToken.scope ]
-            , accessToken = accessToken
-            , idToken = idToken
-            , refreshToken = refreshToken
-            , decodedAccessToken = decodedAccessToken
-            , decodedIdToken = decodedIdToken
-            , expiresAt = decodedAccessToken.exp
-            , refreshFrom = decodedAccessToken.exp
-            }
-        )
-        (rawAccessToken |> Jwt.decode accessTokenDecoder)
-        (rawIdToken |> Jwt.decode idTokenDecoder)
+
+-- rawTokensToAuth : String -> String -> String -> Result String Authenticated
+-- rawTokensToAuth rawAccessToken rawIdToken rawRefreshToken =
+--     Result.map5
+--         (\accessToken idToken refreshToken decodedAccessToken decodedIdToken ->
+--             { subject = decodedAccessToken.sub
+--             , scopes = [ decodedAccessToken.scope ]
+--             , accessToken = accessToken
+--             , idToken = idToken
+--             , refreshToken = refreshToken
+--             , decodedAccessToken = decodedAccessToken
+--             , decodedIdToken = decodedIdToken
+--             , expiresAt = decodedAccessToken.exp
+--             , refreshFrom = decodedAccessToken.exp
+--             }
+--         )
+--         (rawAccessToken |> Jwt.decode accessTokenDecoder)
+--         (rawIdToken |> Jwt.decode idTokenDecoder)
