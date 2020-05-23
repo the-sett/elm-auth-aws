@@ -1080,25 +1080,6 @@ getAccessToken model =
         |> Maybe.map (Refined.unbox CIP.tokenModelType)
 
 
-getDecodedAccessToken : Model -> Maybe AccessToken
-getDecodedAccessToken model =
-    getAuthenticated model
-        |> Maybe.map .decodedAccessToken
-
-
-getIdToken : Model -> Maybe String
-getIdToken model =
-    getAuthenticated model
-        |> Maybe.map .idToken
-        |> Maybe.map (Refined.unbox CIP.tokenModelType)
-
-
-getDecodedIdToken : Model -> Maybe IdToken
-getDecodedIdToken model =
-    getAuthenticated model
-        |> Maybe.map .decodedIdToken
-
-
 getAuthenticated : Model -> Maybe Authenticated
 getAuthenticated model =
     let
