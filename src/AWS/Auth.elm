@@ -190,11 +190,13 @@ type alias SaveState =
     , accessToken : String
     , idToken : String
     , refreshToken : String
-    , userIdentity :
-        Maybe
-            { mapping : UserIdentityMapping
-            , credentials : Credentials
-            }
+    , userIdentity : Maybe SavedUserIdentity
+    }
+
+
+type alias SavedUserIdentity =
+    { mapping : UserIdentityMapping
+    , credentials : AWS.Core.Credentials.Credentials
     }
 
 
@@ -207,6 +209,34 @@ saveStateCodec =
         |> Codec.field "idToken" .idToken Codec.string
         |> Codec.field "refreshToken" .refreshToken Codec.string
         |> Codec.optionalField "userIdentity" .userIdentity userIdentityMappingCodec
+        |> Codec.buildObject
+
+
+savedUserIdentityCodec : Codec SavedUserIdentity
+savedUserIdentityCodec =
+    Codec.object UserIdentityMapping
+        |> Codec.field "mapping" .mapping userIdentityMappingCodec
+        |> Codec.field "credentials" .credentials credentialsCodec
+        |> Codec.buildObject
+
+
+userIdentityMappingCodec : Codec UserIdentityMapping
+userIdentityMappingCodec =
+    Codec.object UserIdentityMapping
+        |> Codec.field "identityPoolId" .identityPoolId Codec.string
+        |> Codec.field "idProviderName" .identityProviderName Codec.string
+        |> Codec.field "accountId" .accountId Codec.string
+        |> Codec.buildObject
+
+
+credentialsCodec : Codec Credentials
+credentialsCodec =
+    Codec.object
+        (\accessKeyId secretAccessKey ->
+            AWS.Core.Credentials.fromAccessKeys accessKeyId secretAccessKey
+        )
+        |> Codec.field "accessKeyId" AWS.Core.Credentials.accessKeyId
+        |> Codec.field "secretAccessKey" AWS.Core.Credentials.secretAccessKey
         |> Codec.buildObject
 
 
