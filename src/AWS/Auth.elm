@@ -203,18 +203,18 @@ type alias SavedUserIdentity =
 saveStateCodec : Codec SaveState
 saveStateCodec =
     Codec.object SaveState
-        |> Codec.field "clientId" .clientId Codec.string
+        |> Codec.field "clientId" .clientId CIP.clientIdTypeCodec
         |> Codec.field "region" .region Codec.string
         |> Codec.field "accessToken" .accessToken Codec.string
         |> Codec.field "idToken" .idToken Codec.string
         |> Codec.field "refreshToken" .refreshToken Codec.string
-        |> Codec.optionalField "userIdentity" .userIdentity userIdentityMappingCodec
+        |> Codec.optionalField "userIdentity" .userIdentity savedUserIdentityCodec
         |> Codec.buildObject
 
 
 savedUserIdentityCodec : Codec SavedUserIdentity
 savedUserIdentityCodec =
-    Codec.object UserIdentityMapping
+    Codec.object SavedUserIdentity
         |> Codec.field "mapping" .mapping userIdentityMappingCodec
         |> Codec.field "credentials" .credentials credentialsCodec
         |> Codec.buildObject
@@ -223,20 +223,26 @@ savedUserIdentityCodec =
 userIdentityMappingCodec : Codec UserIdentityMapping
 userIdentityMappingCodec =
     Codec.object UserIdentityMapping
-        |> Codec.field "identityPoolId" .identityPoolId Codec.string
-        |> Codec.field "idProviderName" .identityProviderName Codec.string
-        |> Codec.field "accountId" .accountId Codec.string
+        |> Codec.field "identityPoolId" .identityPoolId CI.identityPoolIdCodec
+        |> Codec.field "idProviderName" .identityProviderName CI.identityProviderNameCodec
+        |> Codec.field "accountId" .accountId CI.accountIdCodec
         |> Codec.buildObject
 
 
-credentialsCodec : Codec Credentials
+
+--   identityPoolId : CI.IdentityPoolId
+-- , identityProviderName : CI.IdentityProviderName
+-- , accountId : CI.AccountId
+
+
+credentialsCodec : Codec AWS.Core.Credentials.Credentials
 credentialsCodec =
     Codec.object
         (\accessKeyId secretAccessKey ->
             AWS.Core.Credentials.fromAccessKeys accessKeyId secretAccessKey
         )
-        |> Codec.field "accessKeyId" AWS.Core.Credentials.accessKeyId
-        |> Codec.field "secretAccessKey" AWS.Core.Credentials.secretAccessKey
+        |> Codec.field "accessKeyId" AWS.Core.Credentials.accessKeyId Codec.string
+        |> Codec.field "secretAccessKey" AWS.Core.Credentials.secretAccessKey Codec.string
         |> Codec.buildObject
 
 
