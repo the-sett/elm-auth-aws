@@ -49,7 +49,7 @@ be used to obtain the raw access directly, if it needs to be used in a different
 way.
 
 -}
-api : AuthAPI Config Model Msg AuthExtensions Challenge CognitoAPI
+api : AuthAPI Config Model Msg AuthExtensions Challenge CognitoAPI FailReason
 api =
     { init = init
     , login = login
@@ -96,6 +96,12 @@ type alias AuthExtensions =
     , decodedIdToken : IdToken
     , saveState : Value
     }
+
+
+{-| Gives a reason why the `Failed` state has been reached.
+-}
+type FailReason
+    = FailReason
 
 
 {-| The types of challenges that Cognito can issue.
@@ -391,7 +397,7 @@ setAuthState inner model =
 
 {-| Extracts a summary view of the authentication status from the model.
 -}
-getStatus : AuthState -> Status AuthExtensions Challenge
+getStatus : AuthState -> Status AuthExtensions Challenge FailReason
 getStatus authState =
     let
         extractAuth : AuthState.State p { m | auth : Authenticated } -> AuthInfo AuthExtensions
@@ -436,7 +442,7 @@ getStatus authState =
             LoggedOut
 
         AuthState.Failed _ ->
-            Failed
+            Failed FailReason
 
         AuthState.LoggedIn state ->
             LoggedIn <| extractAuth state
@@ -454,7 +460,7 @@ getStatus authState =
 {-| Compares two AuthStates and outputs the status of the newer one, if it differs
 from the older one, otherwise Nothing.
 -}
-statusChange : AuthState -> AuthState -> Maybe (Status AuthExtensions Challenge)
+statusChange : AuthState -> AuthState -> Maybe (Status AuthExtensions Challenge FailReason)
 statusChange oldAuthState newAuthState =
     let
         oldStatus =
@@ -467,8 +473,8 @@ statusChange oldAuthState newAuthState =
         ( LoggedIn _, LoggedIn _ ) ->
             Nothing
 
-        ( Failed, Failed ) ->
-            Nothing
+        ( _, Failed _ ) ->
+            Just newStatus
 
         ( LoggedOut, LoggedOut ) ->
             Nothing
@@ -486,7 +492,7 @@ statusChange oldAuthState newAuthState =
 
 {-| Updates the model from Auth commands.
 -}
-update : Msg -> Model -> ( Model, Cmd Msg, Maybe (Status AuthExtensions Challenge) )
+update : Msg -> Model -> ( Model, Cmd Msg, Maybe (Status AuthExtensions Challenge FailReason) )
 update msg model =
     let
         authState =
