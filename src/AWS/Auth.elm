@@ -19,6 +19,7 @@ import AWS.Core.Service exposing (Region, Service)
 import AWS.Tokens exposing (AccessToken, IdToken)
 import AuthAPI exposing (AuthAPI, AuthInfo, Credentials, Status(..))
 import AuthState exposing (Allowed, AuthState, Authenticated, ChallengeSpec)
+import Codec
 import Dict exposing (Dict)
 import Dict.Refined
 import Http
@@ -195,6 +196,32 @@ type alias SaveState =
             , credentials : Credentials
             }
     }
+
+
+
+-- saveStateEncoder : SaveState -> Value
+-- saveStateEncoder saveState =
+--     Encoder.object
+--         [ ( "clientId", Encode.string saveState.clientId )
+--         , ( "region", Encode.string saveState.region )
+--         , ( "accessToken", Encode.string saveState.accessToken )
+--         , ( "idToken", Encode.string saveState.idToken )
+--         , ( "refreshToken", Encode.string saveState.refreshToken )
+--         , ( "userIdentity", userIdentityMappingEncoder saveState.userIdentity )
+--         ]
+--
+--
+-- userIdentityMappingEncoder : Maybe UserIdentityMapping -> Value
+-- userIdentityMappingEncoder uid =
+--     case uid of
+--         Nothing ->
+--             Encode.null
+--
+--         Just { mapping, credentials } ->
+--             Encoder.object
+--                 [ ( "mapping", userIdentityMappingEncoder mapping )
+--                 , ( "credentials", credentialsEncoder credentials )
+--                 ]
 
 
 {-| The private authentication state.
