@@ -4,6 +4,7 @@ module AuthState exposing
     , Authenticated
     , ChallengeSpec
     , State
+    , loggedIn
     , loggedOut
     , mapAuthenticated
     , toAttempting

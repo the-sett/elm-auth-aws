@@ -26,7 +26,7 @@ import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Extra exposing (andMap, withDefault)
 import Json.Encode as Encode exposing (Value)
-import Jwt
+import Jwt exposing (JwtError(..))
 import Process
 import Refined
 import Task
@@ -174,8 +174,7 @@ type alias Model =
 
 
 type alias UserIdentityMapping =
-    { -- userPoolId : CI.UserPoolIdType
-      identityPoolId : CI.IdentityPoolId
+    { identityPoolId : CI.IdentityPoolId
     , identityProviderName : CI.IdentityProviderName
     , accountId : CI.AccountId
     }
@@ -187,6 +186,8 @@ LoggedIn state.
 type alias SaveState =
     { clientId : CIP.ClientIdType
     , region : Region
+    , authHeaderName : String
+    , authHeaderPrefix : Maybe String
     , accessToken : String
     , idToken : String
     , refreshToken : String
@@ -205,6 +206,8 @@ saveStateCodec =
     Codec.object SaveState
         |> Codec.field "clientId" .clientId CIP.clientIdTypeCodec
         |> Codec.field "region" .region Codec.string
+        |> Codec.field "authHeaderName" .authHeaderName Codec.string
+        |> Codec.optionalField "authHeaderPrefix" .authHeaderPrefix Codec.string
         |> Codec.field "accessToken" .accessToken Codec.string
         |> Codec.field "idToken" .idToken Codec.string
         |> Codec.field "refreshToken" .refreshToken Codec.string
@@ -229,12 +232,6 @@ userIdentityMappingCodec =
         |> Codec.buildObject
 
 
-
---   identityPoolId : CI.IdentityPoolId
--- , identityProviderName : CI.IdentityProviderName
--- , accountId : CI.AccountId
-
-
 credentialsCodec : Codec AWS.Core.Credentials.Credentials
 credentialsCodec =
     Codec.object
@@ -244,22 +241,6 @@ credentialsCodec =
         |> Codec.field "accessKeyId" AWS.Core.Credentials.accessKeyId Codec.string
         |> Codec.field "secretAccessKey" AWS.Core.Credentials.secretAccessKey Codec.string
         |> Codec.buildObject
-
-
-
---
---
--- userIdentityMappingEncoder : Maybe UserIdentityMapping -> Value
--- userIdentityMappingEncoder uid =
---     case uid of
---         Nothing ->
---             Encode.null
---
---         Just { mapping, credentials } ->
---             Encoder.object
---                 [ ( "mapping", userIdentityMappingEncoder mapping )
---                 , ( "credentials", credentialsEncoder credentials )
---                 ]
 
 
 {-| The private authentication state.
@@ -434,8 +415,62 @@ getAWSCredentials model =
 
 
 restore : Value -> Result String Model
-restore _ =
-    Err "todo"
+restore val =
+    Codec.decodeValue saveStateCodec val
+        |> Result.mapError Decode.errorToString
+        |> Result.andThen saveStateToLoggedIn
+
+
+saveStateToLoggedIn : SaveState -> Result String Model
+saveStateToLoggedIn save =
+    Result.map
+        (\authenticated ->
+            { clientId = save.clientId
+            , region = save.region
+            , authHeaderName = save.authHeaderName
+            , authHeaderPrefix = save.authHeaderPrefix
+            , userIdentityMapping = Maybe.map .mapping save.userIdentity
+            , innerModel =
+                AuthState.loggedIn authenticated (Maybe.map .credentials save.userIdentity)
+                    |> Private
+            }
+        )
+        (rawTokensToAuth save.accessToken save.idToken save.refreshToken)
+
+
+rawTokensToAuth : String -> String -> String -> Result String Authenticated
+rawTokensToAuth rawAccessToken rawIdToken rawRefreshToken =
+    Result.map5
+        (\accessToken idToken refreshToken decodedAccessToken decodedIdToken ->
+            { subject = decodedAccessToken.sub
+            , scopes = [ decodedAccessToken.scope ]
+            , accessToken = accessToken
+            , idToken = idToken
+            , refreshToken = refreshToken
+            , decodedAccessToken = decodedAccessToken
+            , decodedIdToken = decodedIdToken
+            , expiresAt = decodedAccessToken.exp
+            , refreshFrom = decodedAccessToken.exp
+            }
+        )
+        (Refined.build CIP.tokenModelType rawAccessToken |> Result.mapError Refined.stringErrorToString)
+        (Refined.build CIP.tokenModelType rawIdToken |> Result.mapError Refined.stringErrorToString)
+        (Refined.build CIP.tokenModelType rawRefreshToken |> Result.mapError Refined.stringErrorToString)
+        (rawAccessToken |> Jwt.decode accessTokenDecoder |> Result.mapError jwtErrorToString)
+        (rawIdToken |> Jwt.decode idTokenDecoder |> Result.mapError jwtErrorToString)
+
+
+jwtErrorToString : JwtError -> String
+jwtErrorToString jwtError =
+    case jwtError of
+        TokenExpired ->
+            "Token Expired"
+
+        TokenProcessingError msg ->
+            "Token Processing Error " ++ msg
+
+        TokenDecodeError msg ->
+            "Token Decode Error " ++ msg
 
 
 
@@ -1243,23 +1278,3 @@ decodePosix =
     Decode.map
         (Time.millisToPosix << (*) 1000)
         Decode.int
-
-
-
--- rawTokensToAuth : String -> String -> String -> Result String Authenticated
--- rawTokensToAuth rawAccessToken rawIdToken rawRefreshToken =
---     Result.map5
---         (\accessToken idToken refreshToken decodedAccessToken decodedIdToken ->
---             { subject = decodedAccessToken.sub
---             , scopes = [ decodedAccessToken.scope ]
---             , accessToken = accessToken
---             , idToken = idToken
---             , refreshToken = refreshToken
---             , decodedAccessToken = decodedAccessToken
---             , decodedIdToken = decodedIdToken
---             , expiresAt = decodedAccessToken.exp
---             , refreshFrom = decodedAccessToken.exp
---             }
---         )
---         (rawAccessToken |> Jwt.decode accessTokenDecoder)
---         (rawIdToken |> Jwt.decode idTokenDecoder)
