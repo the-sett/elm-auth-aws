@@ -532,10 +532,10 @@ setAuthState inner model =
 
 {-| Extracts a summary view of the authentication status from the model.
 -}
-getStatus : AuthState -> Status AuthExtensions Challenge FailReason
-getStatus authState =
+getStatus : Model -> AuthState -> Status AuthExtensions Challenge FailReason
+getStatus model authState =
     let
-        extractAuth : AuthState.State p { m | auth : Authenticated } -> AuthInfo AuthExtensions
+        extractAuth : AuthState.State p { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials } -> AuthInfo AuthExtensions
         extractAuth state =
             let
                 authModel =
@@ -547,7 +547,7 @@ getStatus authState =
             , decodedAccessToken = authModel.auth.decodedAccessToken
             , idToken = Refined.unbox CIP.tokenModelType authModel.auth.idToken
             , decodedIdToken = authModel.auth.decodedIdToken
-            , saveState = Encode.string "todo"
+            , saveState = loggedInToSaveState model state |> Codec.encodeToValue saveStateCodec
             }
 
         extractChallenge : AuthState.State p { challenge : ChallengeSpec } -> Challenge
@@ -595,14 +595,14 @@ getStatus authState =
 {-| Compares two AuthStates and outputs the status of the newer one, if it differs
 from the older one, otherwise Nothing.
 -}
-statusChange : AuthState -> AuthState -> Maybe (Status AuthExtensions Challenge FailReason)
-statusChange oldAuthState newAuthState =
+statusChange : Model -> AuthState -> AuthState -> Maybe (Status AuthExtensions Challenge FailReason)
+statusChange model oldAuthState newAuthState =
     let
         oldStatus =
-            getStatus oldAuthState
+            getStatus model oldAuthState
 
         newStatus =
-            getStatus newAuthState
+            getStatus model newAuthState
     in
     case ( oldStatus, newStatus ) of
         ( LoggedIn _, LoggedIn _ ) ->
@@ -636,7 +636,7 @@ update msg model =
         ( newAuthState, cmds ) =
             innerUpdate model.region model.clientId model.userIdentityMapping msg authState
     in
-    ( setAuthState newAuthState model, cmds, statusChange authState newAuthState )
+    ( setAuthState newAuthState model, cmds, statusChange model authState newAuthState )
 
 
 innerUpdate :
