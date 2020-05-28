@@ -414,6 +414,10 @@ getAWSCredentials model =
                     Nothing
 
 
+
+--=== Restore and save.
+
+
 restore : Value -> Result String Model
 restore val =
     Codec.decodeValue saveStateCodec val
@@ -471,6 +475,37 @@ jwtErrorToString jwtError =
 
         TokenDecodeError msg ->
             "Token Decode Error " ++ msg
+
+
+loggedInToSaveState :
+    Model
+    -> AuthState.State p { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials }
+    -> SaveState
+loggedInToSaveState model authState =
+    let
+        authModel =
+            AuthState.untag authState
+
+        userIdentity =
+            case ( model.userIdentityMapping, authModel.credentials ) of
+                ( Just mapping, Just creds ) ->
+                    Just
+                        { mapping = mapping
+                        , credentials = creds
+                        }
+
+                _ ->
+                    Nothing
+    in
+    { clientId = model.clientId
+    , region = model.region
+    , authHeaderName = model.authHeaderName
+    , authHeaderPrefix = model.authHeaderPrefix
+    , accessToken = Refined.unbox CIP.tokenModelType authModel.auth.accessToken
+    , idToken = Refined.unbox CIP.tokenModelType authModel.auth.idToken
+    , refreshToken = Refined.unbox CIP.tokenModelType authModel.auth.refreshToken
+    , userIdentity = userIdentity
+    }
 
 
 
