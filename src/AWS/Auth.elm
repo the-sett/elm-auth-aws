@@ -1,6 +1,7 @@
 module AWS.Auth exposing
     ( Config, Model, Msg
     , api, AuthExtensions, Challenge(..), CognitoAPI
+    , FailReason(..)
     )
 
 {-| Manages the state of the authentication process, and provides an API
