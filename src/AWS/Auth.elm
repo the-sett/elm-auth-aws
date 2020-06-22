@@ -185,51 +185,20 @@ type alias UserIdentityMapping =
 LoggedIn state.
 -}
 type alias SaveState =
-    { clientId : CIP.ClientIdType
-    , region : Region
-    , authHeaderName : String
-    , authHeaderPrefix : Maybe String
-    , accessToken : String
+    { accessToken : String
     , idToken : String
     , refreshToken : String
-    , userIdentity : Maybe SavedUserIdentity
-    }
-
-
-type alias SavedUserIdentity =
-    { mapping : UserIdentityMapping
-    , credentials : AWS.Core.Credentials.Credentials
+    , credentials : Maybe AWS.Core.Credentials.Credentials
     }
 
 
 saveStateCodec : Codec SaveState
 saveStateCodec =
     Codec.object SaveState
-        |> Codec.field "clientId" .clientId CIP.clientIdTypeCodec
-        |> Codec.field "region" .region Codec.string
-        |> Codec.field "authHeaderName" .authHeaderName Codec.string
-        |> Codec.optionalField "authHeaderPrefix" .authHeaderPrefix Codec.string
         |> Codec.field "accessToken" .accessToken Codec.string
         |> Codec.field "idToken" .idToken Codec.string
         |> Codec.field "refreshToken" .refreshToken Codec.string
-        |> Codec.optionalField "userIdentity" .userIdentity savedUserIdentityCodec
-        |> Codec.buildObject
-
-
-savedUserIdentityCodec : Codec SavedUserIdentity
-savedUserIdentityCodec =
-    Codec.object SavedUserIdentity
-        |> Codec.field "mapping" .mapping userIdentityMappingCodec
-        |> Codec.field "credentials" .credentials credentialsCodec
-        |> Codec.buildObject
-
-
-userIdentityMappingCodec : Codec UserIdentityMapping
-userIdentityMappingCodec =
-    Codec.object UserIdentityMapping
-        |> Codec.field "identityPoolId" .identityPoolId CI.identityPoolIdCodec
-        |> Codec.field "idProviderName" .identityProviderName CI.identityProviderNameCodec
-        |> Codec.field "accountId" .accountId CI.accountIdCodec
+        |> Codec.optionalField "credentials" .credentials credentialsCodec
         |> Codec.buildObject
 
 
@@ -425,23 +394,6 @@ restore val =
     Restore val |> Task.Extra.message
 
 
-saveStateToLoggedIn : SaveState -> Result String Model
-saveStateToLoggedIn save =
-    Result.map
-        (\authenticated ->
-            { clientId = save.clientId
-            , region = save.region
-            , authHeaderName = save.authHeaderName
-            , authHeaderPrefix = save.authHeaderPrefix
-            , userIdentityMapping = Maybe.map .mapping save.userIdentity
-            , innerModel =
-                AuthState.loggedIn authenticated (Maybe.map .credentials save.userIdentity)
-                    |> Private
-            }
-        )
-        (rawTokensToAuth save.accessToken save.idToken save.refreshToken)
-
-
 rawTokensToAuth : String -> String -> String -> Result String Authenticated
 rawTokensToAuth rawAccessToken rawIdToken rawRefreshToken =
     Result.map5
@@ -485,26 +437,11 @@ loggedInToSaveState model authState =
     let
         authModel =
             AuthState.untag authState
-
-        userIdentity =
-            case ( model.userIdentityMapping, authModel.credentials ) of
-                ( Just mapping, Just creds ) ->
-                    Just
-                        { mapping = mapping
-                        , credentials = creds
-                        }
-
-                _ ->
-                    Nothing
     in
-    { clientId = model.clientId
-    , region = model.region
-    , authHeaderName = model.authHeaderName
-    , authHeaderPrefix = model.authHeaderPrefix
-    , accessToken = Refined.unbox CIP.tokenModelType authModel.auth.accessToken
+    { accessToken = Refined.unbox CIP.tokenModelType authModel.auth.accessToken
     , idToken = Refined.unbox CIP.tokenModelType authModel.auth.idToken
     , refreshToken = Refined.unbox CIP.tokenModelType authModel.auth.refreshToken
-    , userIdentity = userIdentity
+    , credentials = authModel.credentials
     }
 
 
@@ -647,7 +584,7 @@ innerUpdate :
     -> AuthState
     -> ( AuthState, Cmd Msg )
 innerUpdate region clientId userIdentityMapping msg authState =
-    case ( msg, authState ) of
+    case Debug.log "innerUpdate" ( msg, authState ) of
         ( LogIn credentials, AuthState.LoggedOut state ) ->
             updateLogin region clientId credentials state
 
@@ -1197,11 +1134,19 @@ updateRestore region clientId savedVal state =
     in
     case rehydratedResult of
         Ok restoredState ->
-            --( restoredState, Cmd.none )
-            ( AuthState.loggedOut, Cmd.none )
+            ( restoredState, Cmd.none )
 
         Err _ ->
             ( AuthState.loggedOut, Cmd.none )
+
+
+saveStateToLoggedIn : SaveState -> Result String AuthState
+saveStateToLoggedIn save =
+    Result.map
+        (\authenticated ->
+            AuthState.loggedIn authenticated save.credentials
+        )
+        (rawTokensToAuth save.accessToken save.idToken save.refreshToken)
 
 
 
