@@ -76,7 +76,7 @@ api =
 type alias CognitoAPI =
     { requiredNewPassword : String -> Cmd Msg
     , getAWSCredentials : Model -> Maybe AWS.Core.Credentials.Credentials
-    , restore : Value -> Result String Model
+    , restore : Value -> Cmd Msg
     }
 
 
@@ -263,6 +263,7 @@ type Msg
     | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
     | RequestAWSIdentityResponse (Result.Result Http.Error CI.GetIdResponse)
     | RequestAWSCredentialsResponse (Result.Result Http.Error CI.GetCredentialsForIdentityResponse)
+    | Restore Value
 
 
 {-| Attempts to create an initialalized auth state from the configuration.
@@ -419,11 +420,9 @@ getAWSCredentials model =
 --=== Restore and save.
 
 
-restore : Value -> Result String Model
+restore : Value -> Cmd Msg
 restore val =
-    Codec.decodeValue saveStateCodec val
-        |> Result.mapError Decode.errorToString
-        |> Result.andThen saveStateToLoggedIn
+    Restore val |> Task.Extra.message
 
 
 saveStateToLoggedIn : SaveState -> Result String Model
@@ -678,6 +677,9 @@ innerUpdate region clientId userIdentityMapping msg authState =
 
         ( RequestAWSCredentialsResponse credentialsResponse, AuthState.RequestingCredentials state ) ->
             updateRequestAWSCredentialsResponse credentialsResponse state
+
+        ( Restore val, AuthState.LoggedOut state ) ->
+            updateRestore region clientId val state
 
         _ ->
             noop authState
@@ -1178,6 +1180,28 @@ updateRequestAWSCredentialsResponse credentialsResponseResult state =
 
         _ ->
             reset
+
+
+updateRestore :
+    Region
+    -> CIP.ClientIdType
+    -> Value
+    -> AuthState.State { a | attempting : Allowed } m
+    -> ( AuthState, Cmd Msg )
+updateRestore region clientId savedVal state =
+    let
+        rehydratedResult =
+            Codec.decodeValue saveStateCodec savedVal
+                |> Result.mapError Decode.errorToString
+                |> Result.andThen saveStateToLoggedIn
+    in
+    case rehydratedResult of
+        Ok restoredState ->
+            --( restoredState, Cmd.none )
+            ( AuthState.loggedOut, Cmd.none )
+
+        Err _ ->
+            ( AuthState.loggedOut, Cmd.none )
 
 
 
