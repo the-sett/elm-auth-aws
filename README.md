@@ -20,6 +20,12 @@ The `AuthAPI.addAuthHeaders` function adds set the access token in the HTTP Auth
 
 A simple authentication may be all that is required in order to access server side resources. This scenario is covered by a so-called resource server which adds scopes to the tokens and your back-end logic must check the token in order to verify these scopes in order to allow access to protected resource.
 
+## Automatic access token refresh.
+
+When the `LoggedIn` state is achieved, the `update` function will return a `Cmd` which is a timer task. When this timer
+task expires, it automatically performes a refresh of the access token from the refresh token. The expiry interval is chosen to come 30 seconds before the access token expires, or half-way to the access token expiry, whichever is further
+in the future.
+
 # An extended API for Cognito.
 
 ## Amazon IAM Identities.
@@ -37,6 +43,32 @@ https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-scenarios.html
 Cognito can respond to an authentication attempt with a set of challenges that need to be completed in order to succesfully authenticate. For example, a new account may be forced to set up a new password on the first logon.
 
 The `CongitoAPI` provides functions for responding to such challenges, and the `Challenge` type lists all of the supported challenges.
+
+## Save state and restoring auth.
+
+This package provides these extra values and functions in its API over the standard auth API:
+
+```elm
+type alias AuthExtensions =
+    { ...
+    , saveState : Value
+    }
+
+type alias CognitoAPI =
+    { ...
+    , restore : Value -> Cmd Msg
+    }
+```
+
+When the `LoggedIn` state is achieved, a JSON Value will be supplied that encodes the auth state in JSON. This
+includes the refresh, identity and access tokens. A side effecting function is supplied in the API, to attempt to
+restore the auth state to `LoggedIn` from this JSON data. This can be useful if refreshing the page when running
+a single page app - as the auth state can be recovered for example from local storage and the user would not be forced
+to log in again.
+
+You need to consider the security implications of putting auth tokens in browser local storage. Note that this package
+only supplies the JSON value, you would need to explicitly decide where to put the save state. An alternative to local
+storage might be a web worker.
 
 # Issues
 
