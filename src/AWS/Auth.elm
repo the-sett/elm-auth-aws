@@ -1,13 +1,13 @@
 module AWS.Auth exposing
     ( Config, Model, Msg
-    , api, AuthExtensions, Challenge(..), CognitoAPI
+    , api, AuthExtensions, Challenge(..), CognitoAPI, FailReason(..)
     )
 
 {-| Manages the state of the authentication process, and provides an API
 to request authentication operations.
 
 @docs Config, Model, Msg
-@docs api, AuthExtensions, Challenge, CognitoAPI
+@docs api, AuthExtensions, Challenge, CognitoAPI, FailReason
 
 -}
 
@@ -17,15 +17,16 @@ import AWS.Core.Credentials
 import AWS.Core.Http
 import AWS.Core.Service exposing (Region, Service)
 import AWS.Tokens exposing (AccessToken, IdToken)
-import AuthAPI exposing (AuthAPI, Credentials, Status(..))
+import AuthAPI exposing (AuthAPI, AuthInfo, Credentials, Status(..))
 import AuthState exposing (Allowed, AuthState, Authenticated, ChallengeSpec)
+import Codec exposing (Codec)
 import Dict exposing (Dict)
 import Dict.Refined
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Extra exposing (andMap, withDefault)
-import Json.Encode as Encode
-import Jwt
+import Json.Encode as Encode exposing (Value)
+import Jwt exposing (JwtError(..))
 import Process
 import Refined
 import Task
@@ -49,7 +50,7 @@ be used to obtain the raw access directly, if it needs to be used in a different
 way.
 
 -}
-api : AuthAPI Config Model Msg AuthExtensions Challenge CognitoAPI
+api : AuthAPI Config Model Msg AuthExtensions Challenge CognitoAPI FailReason
 api =
     { init = init
     , login = login
@@ -60,10 +61,7 @@ api =
     , addAuthHeaders = addAuthHeaders
     , requiredNewPassword = requiredNewPassword
     , getAWSCredentials = getAWSCredentials
-    , getAccessToken = getAccessToken
-    , getDecodedAccessToken = getDecodedAccessToken
-    , getIdToken = getIdToken
-    , getDecodedIdToken = getDecodedIdToken
+    , restore = restore
     }
 
 
@@ -77,18 +75,34 @@ api =
 type alias CognitoAPI =
     { requiredNewPassword : String -> Cmd Msg
     , getAWSCredentials : Model -> Maybe AWS.Core.Credentials.Credentials
-    , getAccessToken : Model -> Maybe String
-    , getDecodedAccessToken : Model -> Maybe AccessToken
-    , getIdToken : Model -> Maybe String
-    , getDecodedIdToken : Model -> Maybe IdToken
+    , restore : Value -> Cmd Msg
     }
 
 
-{-| Defines the extensions to the `AuthAPI.Authenticated` fields that this
+{-| Defines the extensions to the `AuthAPI.AuthInfo` fields that this
 authenticator supports.
+
+`saveState` provides a JSON serialized snapshot of the authenticated state. This
+can be used with the `CognitoAPI.restore` function to attempt to re-create the
+authenticated state without logging in again. Be aware that the save state will
+contain sensitive information such as access tokens - so think carefully about
+the security implications of where you put it. For example, local storage can be
+compromised by XSS attacks, are you really sure your site is invulnerable to this?
+
 -}
 type alias AuthExtensions =
-    {}
+    { accessToken : String
+    , decodedAccessToken : AccessToken
+    , idToken : String
+    , decodedIdToken : IdToken
+    , saveState : Value
+    }
+
+
+{-| Gives a reason why the `Failed` state has been reached.
+-}
+type FailReason
+    = FailReason
 
 
 {-| The types of challenges that Cognito can issue.
@@ -117,11 +131,24 @@ AWS credentials will be automatically made once logged in. That is to say that
 the user will be mapped to an AWS IAM identity, which can be used to access
 AWS services directly through request signing.
 
+The `authHeaderName` field provides the name of the field into which the
+`AuthAPI.addAuthHeaders` function will set the authentication token. Almost
+always the `Authorization` header field is used.
+
+The 'authHeaderPrefix' may provide a string with which the access token value is
+prefixed in the header field. Patterns like 'Bearer XXX' or 'Token XXX' are common.
+Note that the space will be automatically inserted between then prefix and the
+token, if a prefix is provided - so `authHeaderPrefix = "Bearer"` will yield
+`Bearer XXX`. If no prefix is provided just the token on its own will be set in
+the header field.
+
 -}
 type alias Config =
     { clientId : String
     , region : Region
     , userIdentityMapping : Maybe UserIdentityMappingConfig
+    , authHeaderName : String
+    , authHeaderPrefix : Maybe String
     }
 
 
@@ -140,16 +167,49 @@ type alias Model =
     { clientId : CIP.ClientIdType
     , region : Region
     , userIdentityMapping : Maybe UserIdentityMapping
+    , authHeaderName : String
+    , authHeaderPrefix : Maybe String
     , innerModel : Private
     }
 
 
 type alias UserIdentityMapping =
-    { -- userPoolId : CI.UserPoolIdType
-      identityPoolId : CI.IdentityPoolId
+    { identityPoolId : CI.IdentityPoolId
     , identityProviderName : CI.IdentityProviderName
     , accountId : CI.AccountId
     }
+
+
+{-| The save state when LoggedIn. This can potentially be used to restore the
+LoggedIn state.
+-}
+type alias SaveState =
+    { accessToken : String
+    , idToken : String
+    , refreshToken : String
+    , credentials : Maybe AWS.Core.Credentials.Credentials
+    }
+
+
+saveStateCodec : Codec SaveState
+saveStateCodec =
+    Codec.object SaveState
+        |> Codec.field "accessToken" .accessToken Codec.string
+        |> Codec.field "idToken" .idToken Codec.string
+        |> Codec.field "refreshToken" .refreshToken Codec.string
+        |> Codec.optionalField "credentials" .credentials credentialsCodec
+        |> Codec.buildObject
+
+
+credentialsCodec : Codec AWS.Core.Credentials.Credentials
+credentialsCodec =
+    Codec.object
+        (\accessKeyId secretAccessKey ->
+            AWS.Core.Credentials.fromAccessKeys accessKeyId secretAccessKey
+        )
+        |> Codec.field "accessKeyId" AWS.Core.Credentials.accessKeyId Codec.string
+        |> Codec.field "secretAccessKey" AWS.Core.Credentials.secretAccessKey Codec.string
+        |> Codec.buildObject
 
 
 {-| The private authentication state.
@@ -171,6 +231,7 @@ type Msg
     | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
     | RequestAWSIdentityResponse (Result.Result Http.Error CI.GetIdResponse)
     | RequestAWSCredentialsResponse (Result.Result Http.Error CI.GetCredentialsForIdentityResponse)
+    | Restore Value
 
 
 {-| Attempts to create an initialalized auth state from the configuration.
@@ -193,6 +254,8 @@ init config =
                         , region = config.region
                         , userIdentityMapping = Nothing
                         , innerModel = Private AuthState.loggedOut
+                        , authHeaderName = config.authHeaderName
+                        , authHeaderPrefix = config.authHeaderPrefix
                         }
 
                 Just userIdentityMapping ->
@@ -207,6 +270,8 @@ init config =
                                 , region = config.region
                                 , userIdentityMapping = Just mapping
                                 , innerModel = Private AuthState.loggedOut
+                                , authHeaderName = config.authHeaderName
+                                , authHeaderPrefix = config.authHeaderPrefix
                                 }
 
                         Err strErr ->
@@ -320,6 +385,66 @@ getAWSCredentials model =
 
 
 
+--=== Restore and save.
+
+
+restore : Value -> Cmd Msg
+restore val =
+    Restore val |> Task.Extra.message
+
+
+rawTokensToAuth : String -> String -> String -> Result String Authenticated
+rawTokensToAuth rawAccessToken rawIdToken rawRefreshToken =
+    Result.map5
+        (\accessToken idToken refreshToken decodedAccessToken decodedIdToken ->
+            { subject = decodedAccessToken.sub
+            , scopes = [ decodedAccessToken.scope ]
+            , accessToken = accessToken
+            , idToken = idToken
+            , refreshToken = refreshToken
+            , decodedAccessToken = decodedAccessToken
+            , decodedIdToken = decodedIdToken
+            , expiresAt = decodedAccessToken.exp
+            , refreshFrom = decodedAccessToken.exp
+            }
+        )
+        (Refined.build CIP.tokenModelType rawAccessToken |> Result.mapError Refined.stringErrorToString)
+        (Refined.build CIP.tokenModelType rawIdToken |> Result.mapError Refined.stringErrorToString)
+        (Refined.build CIP.tokenModelType rawRefreshToken |> Result.mapError Refined.stringErrorToString)
+        (rawAccessToken |> Jwt.decode accessTokenDecoder |> Result.mapError jwtErrorToString)
+        (rawIdToken |> Jwt.decode idTokenDecoder |> Result.mapError jwtErrorToString)
+
+
+jwtErrorToString : JwtError -> String
+jwtErrorToString jwtError =
+    case jwtError of
+        TokenExpired ->
+            "Token Expired"
+
+        TokenProcessingError msg ->
+            "Token Processing Error " ++ msg
+
+        TokenDecodeError msg ->
+            "Token Decode Error " ++ msg
+
+
+loggedInToSaveState :
+    Model
+    -> AuthState.State p { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials }
+    -> SaveState
+loggedInToSaveState model authState =
+    let
+        authModel =
+            AuthState.untag authState
+    in
+    { accessToken = Refined.unbox CIP.tokenModelType authModel.auth.accessToken
+    , idToken = Refined.unbox CIP.tokenModelType authModel.auth.idToken
+    , refreshToken = Refined.unbox CIP.tokenModelType authModel.auth.refreshToken
+    , credentials = authModel.credentials
+    }
+
+
+
 -- Processing of auth related requests and internal auth state.
 
 
@@ -343,16 +468,23 @@ setAuthState inner model =
 
 {-| Extracts a summary view of the authentication status from the model.
 -}
-getStatus : AuthState -> Status AuthExtensions Challenge
-getStatus authState =
+getStatus : Model -> AuthState -> Status AuthExtensions Challenge FailReason
+getStatus model authState =
     let
-        extractAuth : AuthState.State p { m | auth : Authenticated } -> { scopes : List String, subject : String }
+        extractAuth : AuthState.State p { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials } -> AuthInfo AuthExtensions
         extractAuth state =
             let
                 authModel =
                     AuthState.untag state
             in
-            { scopes = authModel.auth.scopes, subject = authModel.auth.subject }
+            { scopes = authModel.auth.scopes
+            , subject = authModel.auth.subject
+            , accessToken = Refined.unbox CIP.tokenModelType authModel.auth.accessToken
+            , decodedAccessToken = authModel.auth.decodedAccessToken
+            , idToken = Refined.unbox CIP.tokenModelType authModel.auth.idToken
+            , decodedIdToken = authModel.auth.decodedIdToken
+            , saveState = loggedInToSaveState model state |> Codec.encodeToValue saveStateCodec
+            }
 
         extractChallenge : AuthState.State p { challenge : ChallengeSpec } -> Challenge
         extractChallenge state =
@@ -381,7 +513,7 @@ getStatus authState =
             LoggedOut
 
         AuthState.Failed _ ->
-            Failed
+            Failed FailReason
 
         AuthState.LoggedIn state ->
             LoggedIn <| extractAuth state
@@ -399,21 +531,21 @@ getStatus authState =
 {-| Compares two AuthStates and outputs the status of the newer one, if it differs
 from the older one, otherwise Nothing.
 -}
-statusChange : AuthState -> AuthState -> Maybe (Status AuthExtensions Challenge)
-statusChange oldAuthState newAuthState =
+statusChange : Model -> AuthState -> AuthState -> Maybe (Status AuthExtensions Challenge FailReason)
+statusChange model oldAuthState newAuthState =
     let
         oldStatus =
-            getStatus oldAuthState
+            getStatus model oldAuthState
 
         newStatus =
-            getStatus newAuthState
+            getStatus model newAuthState
     in
     case ( oldStatus, newStatus ) of
         ( LoggedIn _, LoggedIn _ ) ->
             Nothing
 
-        ( Failed, Failed ) ->
-            Nothing
+        ( _, Failed _ ) ->
+            Just newStatus
 
         ( LoggedOut, LoggedOut ) ->
             Nothing
@@ -431,7 +563,7 @@ statusChange oldAuthState newAuthState =
 
 {-| Updates the model from Auth commands.
 -}
-update : Msg -> Model -> ( Model, Cmd Msg, Maybe (Status AuthExtensions Challenge) )
+update : Msg -> Model -> ( Model, Cmd Msg, Maybe (Status AuthExtensions Challenge FailReason) )
 update msg model =
     let
         authState =
@@ -440,7 +572,7 @@ update msg model =
         ( newAuthState, cmds ) =
             innerUpdate model.region model.clientId model.userIdentityMapping msg authState
     in
-    ( setAuthState newAuthState model, cmds, statusChange authState newAuthState )
+    ( setAuthState newAuthState model, cmds, statusChange model authState newAuthState )
 
 
 innerUpdate :
@@ -451,7 +583,7 @@ innerUpdate :
     -> AuthState
     -> ( AuthState, Cmd Msg )
 innerUpdate region clientId userIdentityMapping msg authState =
-    case ( msg, authState ) of
+    case Debug.log "innerUpdate" ( msg, authState ) of
         ( LogIn credentials, AuthState.LoggedOut state ) ->
             updateLogin region clientId credentials state
 
@@ -481,6 +613,9 @@ innerUpdate region clientId userIdentityMapping msg authState =
 
         ( RequestAWSCredentialsResponse credentialsResponse, AuthState.RequestingCredentials state ) ->
             updateRequestAWSCredentialsResponse credentialsResponse state
+
+        ( Restore val, AuthState.LoggedOut state ) ->
+            updateRestore region clientId val state
 
         _ ->
             noop authState
@@ -983,6 +1118,36 @@ updateRequestAWSCredentialsResponse credentialsResponseResult state =
             reset
 
 
+updateRestore :
+    Region
+    -> CIP.ClientIdType
+    -> Value
+    -> AuthState.State { a | attempting : Allowed } m
+    -> ( AuthState, Cmd Msg )
+updateRestore region clientId savedVal state =
+    let
+        rehydratedResult =
+            Codec.decodeValue saveStateCodec savedVal
+                |> Result.mapError Decode.errorToString
+                |> Result.andThen saveStateToLoggedIn
+    in
+    case rehydratedResult of
+        Ok restoredState ->
+            ( restoredState, Cmd.none )
+
+        Err _ ->
+            ( AuthState.loggedOut, Cmd.none )
+
+
+saveStateToLoggedIn : SaveState -> Result String AuthState
+saveStateToLoggedIn save =
+    Result.map
+        (\authenticated ->
+            AuthState.loggedIn authenticated save.credentials
+        )
+        (rawTokensToAuth save.accessToken save.idToken save.refreshToken)
+
+
 
 -- Functions for building and executing the refresh cycle task.
 
@@ -1033,8 +1198,14 @@ addAuthHeaders model headers =
             headers
 
         Just val ->
-            Http.header "Authorization" ("Bearer " ++ val)
-                :: headers
+            case model.authHeaderPrefix of
+                Nothing ->
+                    Http.header model.authHeaderName val
+                        :: headers
+
+                Just prefix ->
+                    Http.header model.authHeaderName (prefix ++ " " ++ val)
+                        :: headers
 
 
 getAccessToken : Model -> Maybe String
@@ -1042,25 +1213,6 @@ getAccessToken model =
     getAuthenticated model
         |> Maybe.map .accessToken
         |> Maybe.map (Refined.unbox CIP.tokenModelType)
-
-
-getDecodedAccessToken : Model -> Maybe AccessToken
-getDecodedAccessToken model =
-    getAuthenticated model
-        |> Maybe.map .decodedAccessToken
-
-
-getIdToken : Model -> Maybe String
-getIdToken model =
-    getAuthenticated model
-        |> Maybe.map .idToken
-        |> Maybe.map (Refined.unbox CIP.tokenModelType)
-
-
-getDecodedIdToken : Model -> Maybe IdToken
-getDecodedIdToken model =
-    getAuthenticated model
-        |> Maybe.map .decodedIdToken
 
 
 getAuthenticated : Model -> Maybe Authenticated

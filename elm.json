@@ -3,7 +3,7 @@
     "name": "the-sett/elm-auth-aws",
     "summary": "Elm auth module for interacting with the-sett/auth-service.",
     "license": "BSD-3-Clause",
-    "version": "3.0.0",
+    "version": "4.0.0",
     "exposed-modules": [
         "AWS.Auth",
         "AWS.Tokens"
@@ -15,7 +15,8 @@
         "elm/json": "1.1.3 <= v < 2.0.0",
         "elm/time": "1.0.0 <= v < 2.0.0",
         "elm-community/json-extra": "4.0.0 <= v < 5.0.0",
-        "the-sett/elm-auth": "4.0.0 <= v < 5.0.0",
+        "miniBill/elm-codec": "1.2.0 <= v < 2.0.0",
+        "the-sett/elm-auth": "5.0.0 <= v < 6.0.0",
         "the-sett/elm-aws-cognito": "1.1.2 <= v < 2.0.0",
         "the-sett/elm-aws-core": "3.1.1 <= v < 4.0.0",
         "the-sett/elm-refine": "1.3.1 <= v < 2.0.0",
