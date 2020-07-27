@@ -13,9 +13,9 @@ to request authentication operations.
 
 import AWS.CognitoIdentity as CI
 import AWS.CognitoIdentityProvider as CIP
-import AWS.Core.Credentials
-import AWS.Core.Http
-import AWS.Core.Service exposing (Region, Service)
+import AWS.Config exposing (Region)
+import AWS.Credentials exposing (Credentials)
+import AWS.Http
 import AWS.Tokens exposing (AccessToken, IdToken)
 import AuthAPI exposing (AuthAPI, AuthInfo, Credentials, Status(..))
 import AuthState exposing (Allowed, AuthState, Authenticated, ChallengeSpec)
@@ -74,7 +74,7 @@ api =
 -}
 type alias CognitoAPI =
     { requiredNewPassword : String -> Cmd Msg
-    , getAWSCredentials : Model -> Maybe AWS.Core.Credentials.Credentials
+    , getAWSCredentials : Model -> Maybe AWS.Credentials.Credentials
     , restore : Value -> Cmd Msg
     }
 
@@ -187,7 +187,8 @@ type alias SaveState =
     { accessToken : String
     , idToken : String
     , refreshToken : String
-    , credentials : Maybe AWS.Core.Credentials.Credentials
+
+    --, credentials : Maybe AWS.Credentials.Credentials
     }
 
 
@@ -197,19 +198,20 @@ saveStateCodec =
         |> Codec.field "accessToken" .accessToken Codec.string
         |> Codec.field "idToken" .idToken Codec.string
         |> Codec.field "refreshToken" .refreshToken Codec.string
-        |> Codec.optionalField "credentials" .credentials credentialsCodec
+        --        |> Codec.optionalField "credentials" .credentials credentialsCodec
         |> Codec.buildObject
 
 
-credentialsCodec : Codec AWS.Core.Credentials.Credentials
-credentialsCodec =
-    Codec.object
-        (\accessKeyId secretAccessKey ->
-            AWS.Core.Credentials.fromAccessKeys accessKeyId secretAccessKey
-        )
-        |> Codec.field "accessKeyId" AWS.Core.Credentials.accessKeyId Codec.string
-        |> Codec.field "secretAccessKey" AWS.Core.Credentials.secretAccessKey Codec.string
-        |> Codec.buildObject
+
+-- credentialsCodec : Codec AWS.Credentials.Credentials
+-- credentialsCodec =
+--     Codec.object
+--         (\accessKeyId secretAccessKey ->
+--             AWS.Credentials.fromAccessKeys accessKeyId secretAccessKey
+--         )
+--         |> Codec.field "accessKeyId" AWS.Credentials.accessKeyId Codec.string
+--         |> Codec.field "secretAccessKey" AWS.Credentials.secretAccessKey Codec.string
+--         |> Codec.buildObject
 
 
 {-| The private authentication state.
@@ -227,7 +229,7 @@ type Msg
     | NotAuthed
     | RespondToChallenge (Dict String String)
     | InitiateAuthResponse (Result.Result Http.Error CIP.InitiateAuthResponse)
-    | SignOutResponse (Result.Result Http.Error CIP.GlobalSignOutResponse)
+    | SignOutResponse (Result.Result Http.Error ())
     | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
     | RequestAWSIdentityResponse (Result.Result Http.Error CI.GetIdResponse)
     | RequestAWSCredentialsResponse (Result.Result Http.Error CI.GetCredentialsForIdentityResponse)
@@ -365,7 +367,7 @@ providing a value for `Config.userIdentityMapping`, this will return the
 AWS access credentials that were fetched from a Cognito Identity pool duing
 the log in process.
 -}
-getAWSCredentials : Model -> Maybe AWS.Core.Credentials.Credentials
+getAWSCredentials : Model -> Maybe AWS.Credentials.Credentials
 getAWSCredentials model =
     let
         tryGetCredentials state =
@@ -430,7 +432,7 @@ jwtErrorToString jwtError =
 
 loggedInToSaveState :
     Model
-    -> AuthState.State p { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials }
+    -> AuthState.State p { m | auth : Authenticated, credentials : Maybe AWS.Credentials.Credentials }
     -> SaveState
 loggedInToSaveState model authState =
     let
@@ -440,7 +442,8 @@ loggedInToSaveState model authState =
     { accessToken = Refined.unbox CIP.tokenModelType authModel.auth.accessToken
     , idToken = Refined.unbox CIP.tokenModelType authModel.auth.idToken
     , refreshToken = Refined.unbox CIP.tokenModelType authModel.auth.refreshToken
-    , credentials = authModel.credentials
+
+    --, credentials = authModel.credentials
     }
 
 
@@ -471,7 +474,7 @@ setAuthState inner model =
 getStatus : Model -> AuthState -> Status AuthExtensions Challenge FailReason
 getStatus model authState =
     let
-        extractAuth : AuthState.State p { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials } -> AuthInfo AuthExtensions
+        extractAuth : AuthState.State p { m | auth : Authenticated, credentials : Maybe AWS.Credentials.Credentials } -> AuthInfo AuthExtensions
         extractAuth state =
             let
                 authModel =
@@ -658,7 +661,7 @@ updateLogin region clientId credentials state =
 
         authCmd =
             authRequest
-                |> AWS.Core.Http.sendUnsigned (CIP.service region)
+                |> AWS.Http.sendUnsigned (CIP.service region)
                 |> Task.attempt InitiateAuthResponse
     in
     ( AuthState.toAttempting state, authCmd )
@@ -675,7 +678,7 @@ updateLogout region state =
 
         logoutCmd =
             CIP.globalSignOut { accessToken = auth.accessToken }
-                |> AWS.Core.Http.sendUnsigned (CIP.service region)
+                |> AWS.Http.sendUnsigned (CIP.service region)
                 |> Task.attempt SignOutResponse
     in
     ( AuthState.loggedOut, logoutCmd )
@@ -684,7 +687,7 @@ updateLogout region state =
 updateRefresh :
     Region
     -> CIP.ClientIdType
-    -> AuthState.State { a | refreshing : Allowed } { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials }
+    -> AuthState.State { a | refreshing : Allowed } { m | auth : Authenticated, credentials : Maybe AWS.Credentials.Credentials }
     -> ( AuthState, Cmd Msg )
 updateRefresh region clientId state =
     let
@@ -715,7 +718,7 @@ updateRefresh region clientId state =
 
         authCmd =
             authRequest
-                |> AWS.Core.Http.sendUnsigned (CIP.service region)
+                |> AWS.Http.sendUnsigned (CIP.service region)
                 |> Task.attempt InitiateAuthResponse
     in
     ( AuthState.toRefreshing credentials state, authCmd )
@@ -820,7 +823,7 @@ handleAuthResult authResult region userIdentityMapping state =
 
 updateInitiateAuthResponseForRefresh :
     Result.Result Http.Error CIP.InitiateAuthResponse
-    -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials }
+    -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated, credentials : Maybe AWS.Credentials.Credentials }
     -> ( AuthState, Cmd Msg )
 updateInitiateAuthResponseForRefresh loginResult state =
     case loginResult of
@@ -838,7 +841,7 @@ updateInitiateAuthResponseForRefresh loginResult state =
 
 handleAuthResultForRefresh :
     CIP.AuthenticationResultType
-    -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated, credentials : Maybe AWS.Core.Credentials.Credentials }
+    -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated, credentials : Maybe AWS.Credentials.Credentials }
     -> ( AuthState, Cmd Msg )
 handleAuthResultForRefresh authResult state =
     case ( authResult.idToken, authResult.accessToken ) of
@@ -945,7 +948,7 @@ updateRespondToChallenge region clientId responseParams state =
 
         challengeCmd =
             challengeRequest
-                |> AWS.Core.Http.sendUnsigned (CIP.service region)
+                |> AWS.Http.sendUnsigned (CIP.service region)
                 |> Task.attempt RespondToChallengeResponse
     in
     ( AuthState.toResponding challengeSpec state, challengeCmd )
@@ -1010,7 +1013,7 @@ requestAWSIdentity region userIdentityMapping auth =
 
                 getIdCmd =
                     getIdRequest
-                        |> AWS.Core.Http.sendUnsigned (CI.service region)
+                        |> AWS.Http.sendUnsigned (CI.service region)
                         |> Task.attempt RequestAWSIdentityResponse
             in
             getIdCmd
@@ -1076,7 +1079,7 @@ requestAWSCredentials region userIdentityMapping identityId auth =
 
                 credentialsCmd =
                     getCredentialsRequest
-                        |> AWS.Core.Http.sendUnsigned (CI.service region)
+                        |> AWS.Http.sendUnsigned (CI.service region)
                         |> Task.attempt RequestAWSCredentialsResponse
             in
             credentialsCmd
@@ -1103,8 +1106,8 @@ updateRequestAWSCredentialsResponse credentialsResponseResult state =
                         ( Just accessKeyId, Just secretKey, Just sessionToken ) ->
                             let
                                 coreCredentials =
-                                    AWS.Core.Credentials.fromAccessKeys accessKeyId secretKey
-                                        |> AWS.Core.Credentials.setSessionToken sessionToken
+                                    AWS.Credentials.fromAccessKeys accessKeyId secretKey
+                                        |> AWS.Credentials.withSessionToken sessionToken
                             in
                             ( AuthState.toLoggedIn auth (Just coreCredentials) state, Cmd.none )
 
@@ -1143,7 +1146,7 @@ saveStateToLoggedIn : SaveState -> Result String AuthState
 saveStateToLoggedIn save =
     Result.map
         (\authenticated ->
-            AuthState.loggedIn authenticated save.credentials
+            AuthState.loggedIn authenticated Nothing
         )
         (rawTokensToAuth save.accessToken save.idToken save.refreshToken)
 

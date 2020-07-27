@@ -21,7 +21,7 @@ module AuthState exposing
 
 import AWS.CognitoIdentity as CI
 import AWS.CognitoIdentityProvider as CIP
-import AWS.Core.Credentials exposing (Credentials)
+import AWS.Credentials exposing (Credentials)
 import AWS.Tokens exposing (AccessToken, IdToken)
 import StateMachine exposing (Allowed, State(..), map)
 import Time exposing (Posix)
