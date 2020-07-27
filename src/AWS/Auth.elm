@@ -229,7 +229,7 @@ type Msg
     | NotAuthed
     | RespondToChallenge (Dict String String)
     | InitiateAuthResponse (Result.Result Http.Error CIP.InitiateAuthResponse)
-    | SignOutResponse (Result.Result Http.Error CIP.GlobalSignOutResponse)
+    | SignOutResponse (Result.Result Http.Error ())
     | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
     | RequestAWSIdentityResponse (Result.Result Http.Error CI.GetIdResponse)
     | RequestAWSCredentialsResponse (Result.Result Http.Error CI.GetCredentialsForIdentityResponse)
