@@ -187,7 +187,8 @@ type alias SaveState =
     { accessToken : String
     , idToken : String
     , refreshToken : String
-    , credentials : Maybe AWS.Credentials.Credentials
+
+    --, credentials : Maybe AWS.Credentials.Credentials
     }
 
 
@@ -197,19 +198,20 @@ saveStateCodec =
         |> Codec.field "accessToken" .accessToken Codec.string
         |> Codec.field "idToken" .idToken Codec.string
         |> Codec.field "refreshToken" .refreshToken Codec.string
-        |> Codec.optionalField "credentials" .credentials credentialsCodec
+        --        |> Codec.optionalField "credentials" .credentials credentialsCodec
         |> Codec.buildObject
 
 
-credentialsCodec : Codec AWS.Credentials.Credentials
-credentialsCodec =
-    Codec.object
-        (\accessKeyId secretAccessKey ->
-            AWS.Credentials.fromAccessKeys accessKeyId secretAccessKey
-        )
-        |> Codec.field "accessKeyId" AWS.Credentials.accessKeyId Codec.string
-        |> Codec.field "secretAccessKey" AWS.Credentials.secretAccessKey Codec.string
-        |> Codec.buildObject
+
+-- credentialsCodec : Codec AWS.Credentials.Credentials
+-- credentialsCodec =
+--     Codec.object
+--         (\accessKeyId secretAccessKey ->
+--             AWS.Credentials.fromAccessKeys accessKeyId secretAccessKey
+--         )
+--         |> Codec.field "accessKeyId" AWS.Credentials.accessKeyId Codec.string
+--         |> Codec.field "secretAccessKey" AWS.Credentials.secretAccessKey Codec.string
+--         |> Codec.buildObject
 
 
 {-| The private authentication state.
@@ -440,7 +442,8 @@ loggedInToSaveState model authState =
     { accessToken = Refined.unbox CIP.tokenModelType authModel.auth.accessToken
     , idToken = Refined.unbox CIP.tokenModelType authModel.auth.idToken
     , refreshToken = Refined.unbox CIP.tokenModelType authModel.auth.refreshToken
-    , credentials = authModel.credentials
+
+    --, credentials = authModel.credentials
     }
 
 
@@ -1104,7 +1107,7 @@ updateRequestAWSCredentialsResponse credentialsResponseResult state =
                             let
                                 coreCredentials =
                                     AWS.Credentials.fromAccessKeys accessKeyId secretKey
-                                        |> AWS.Credentials.setSessionToken sessionToken
+                                        |> AWS.Credentials.withSessionToken sessionToken
                             in
                             ( AuthState.toLoggedIn auth (Just coreCredentials) state, Cmd.none )
 
@@ -1143,7 +1146,7 @@ saveStateToLoggedIn : SaveState -> Result String AuthState
 saveStateToLoggedIn save =
     Result.map
         (\authenticated ->
-            AuthState.loggedIn authenticated save.credentials
+            AuthState.loggedIn authenticated Nothing
         )
         (rawTokensToAuth save.accessToken save.idToken save.refreshToken)
 
