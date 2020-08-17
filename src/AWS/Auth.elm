@@ -228,11 +228,11 @@ type Msg
     | LogOut
     | NotAuthed
     | RespondToChallenge (Dict String String)
-    | InitiateAuthResponse (Result.Result Http.Error CIP.InitiateAuthResponse)
-    | SignOutResponse (Result.Result Http.Error ())
-    | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
-    | RequestAWSIdentityResponse (Result.Result Http.Error CI.GetIdResponse)
-    | RequestAWSCredentialsResponse (Result.Result Http.Error CI.GetCredentialsForIdentityResponse)
+    | InitiateAuthResponse (Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CIP.InitiateAuthResponse)
+    | SignOutResponse (Result.Result (AWS.Http.Error AWS.Http.AWSAppError) ())
+    | RespondToChallengeResponse (Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CIP.RespondToAuthChallengeResponse)
+    | RequestAWSIdentityResponse (Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CI.GetIdResponse)
+    | RequestAWSCredentialsResponse (Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CI.GetCredentialsForIdentityResponse)
     | Restore Value
 
 
@@ -725,7 +725,7 @@ updateRefresh region clientId state =
 
 
 updateInitiateAuthResponse :
-    Result.Result Http.Error CIP.InitiateAuthResponse
+    Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CIP.InitiateAuthResponse
     -> Region
     -> Maybe UserIdentityMapping
     -> AuthState.State { a | loggedIn : Allowed, requestingId : Allowed, failed : Allowed, challenged : Allowed } m
@@ -822,7 +822,7 @@ handleAuthResult authResult region userIdentityMapping state =
 
 
 updateInitiateAuthResponseForRefresh :
-    Result.Result Http.Error CIP.InitiateAuthResponse
+    Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CIP.InitiateAuthResponse
     -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated, credentials : Maybe AWS.Credentials.Credentials }
     -> ( AuthState, Cmd Msg )
 updateInitiateAuthResponseForRefresh loginResult state =
@@ -955,7 +955,7 @@ updateRespondToChallenge region clientId responseParams state =
 
 
 updateRespondToChallengeResponse :
-    Result.Result Http.Error CIP.RespondToAuthChallengeResponse
+    Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CIP.RespondToAuthChallengeResponse
     -> Region
     -> Maybe UserIdentityMapping
     -> AuthState.State { a | loggedIn : Allowed, requestingId : Allowed, challenged : Allowed, failed : Allowed } { m | challenge : ChallengeSpec }
@@ -1025,7 +1025,7 @@ requestAWSIdentity region userIdentityMapping auth =
 updateRequestAWSIdentityResponse :
     Region
     -> Maybe UserIdentityMapping
-    -> Result Http.Error CI.GetIdResponse
+    -> Result (AWS.Http.Error AWS.Http.AWSAppError) CI.GetIdResponse
     -> AuthState.State { a | requestingCredentials : Allowed } { m | auth : Authenticated }
     -> ( AuthState, Cmd Msg )
 updateRequestAWSIdentityResponse region maybeUserIdentityMapping idResponseResult state =
@@ -1089,7 +1089,7 @@ requestAWSCredentials region userIdentityMapping identityId auth =
 
 
 updateRequestAWSCredentialsResponse :
-    Result Http.Error CI.GetCredentialsForIdentityResponse
+    Result (AWS.Http.Error AWS.Http.AWSAppError) CI.GetCredentialsForIdentityResponse
     -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated }
     -> ( AuthState, Cmd Msg )
 updateRequestAWSCredentialsResponse credentialsResponseResult state =
