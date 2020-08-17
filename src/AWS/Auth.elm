@@ -104,7 +104,8 @@ type alias AuthExtensions =
 {-| Gives a reason why the `Failed` state has been reached.
 -}
 type FailReason
-    = FailReason
+    = PasswordResetRequired
+    | FailReason
 
 
 {-| The types of challenges that Cognito can issue.
@@ -737,7 +738,10 @@ updateInitiateAuthResponse :
     -> ( AuthState, Cmd Msg )
 updateInitiateAuthResponse loginResult region userIdentityMapping state =
     case loginResult of
-        Err httpErr ->
+        Err (AWS.Http.HttpError httpErr) ->
+            failed state
+
+        Err (AWS.Http.AWSError appErr) ->
             failed state
 
         Ok authResponse ->
