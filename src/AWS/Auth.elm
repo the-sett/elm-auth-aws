@@ -1,6 +1,7 @@
 module AWS.Auth exposing
     ( Config, Model, Msg
     , api, AuthExtensions, Challenge(..), CognitoAPI, FailReason(..)
+    , UserIdentityMappingConfig, UserIdentityMapping
     )
 
 {-| Manages the state of the authentication process, and provides an API
@@ -8,6 +9,7 @@ to request authentication operations.
 
 @docs Config, Model, Msg
 @docs api, AuthExtensions, Challenge, CognitoAPI, FailReason
+@docs UserIdentityMappingConfig, UserIdentityMapping
 
 -}
 
@@ -173,6 +175,9 @@ type alias Model =
     }
 
 
+{-| Holds the `UserIdentityMappingConfig` parameters if they pass parsing into
+the valid format accepeted by Cognito.
+-}
 type alias UserIdentityMapping =
     { identityPoolId : CI.IdentityPoolId
     , identityProviderName : CI.IdentityProviderName
