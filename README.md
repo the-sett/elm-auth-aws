@@ -44,6 +44,12 @@ Cognito can respond to an authentication attempt with a set of challenges that n
 
 The `CongitoAPI` provides functions for responding to such challenges, and the `Challenge` type lists all of the supported challenges.
 
+## Failure reasons.
+
+The API documents a set of `FailReason`s which closely follows the error types that AWS Cognito or Cognito Identity Provider APIs can generate. This allows the user of this authentication API to differentiate the ways in which authentication failures happen. Is
+the password wrong, is the user not known, is the user not verified, does the users password 
+need reset and so on. The `FailReason` also accounts for server errors on AWS.
+
 ## Save state and restoring auth.
 
 This package provides these extra values and functions in its API over the standard auth API:
