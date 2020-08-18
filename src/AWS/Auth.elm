@@ -105,30 +105,57 @@ type alias AuthExtensions =
 {-| Gives a reason why the `Failed` state has been reached.
 -}
 type FailReason
-    = NotAuthorized
-    | ResourceNotFound
+    = ResourceNotFound
+    | NotAuthorized
+    | TooManyRequests
+    | UnexpectedLambda
+    | InvalidUserPoolConfiguration
+    | UserLambdaValidation
+    | InvalidLambdaResponse
     | PasswordResetRequired
     | UserNotFound
     | UserNotConfirmed
-    | Other String
+    | AWSServerError
+    | UnexpectedError String
 
 
 failReasonEnum : Enum FailReason
 failReasonEnum =
     Enum.define
-        [ NotAuthorized
-        , ResourceNotFound
+        [ ResourceNotFound
+        , NotAuthorized
+        , TooManyRequests
+        , UnexpectedLambda
+        , InvalidUserPoolConfiguration
+        , UserLambdaValidation
+        , InvalidLambdaResponse
         , PasswordResetRequired
         , UserNotFound
         , UserNotConfirmed
+        , AWSServerError
         ]
         (\val ->
             case val of
+                ResourceNotFound ->
+                    "ResourceNotFoundException"
+
                 NotAuthorized ->
                     "NotAuthorizedException"
 
-                ResourceNotFound ->
-                    "ResourceNotFoundException"
+                TooManyRequests ->
+                    "TooManyRequestsException"
+
+                UnexpectedLambda ->
+                    "UnexpectedLambdaException"
+
+                InvalidUserPoolConfiguration ->
+                    "InvalidUserPoolConfigurationException"
+
+                UserLambdaValidation ->
+                    "UserLambdaValidationException"
+
+                InvalidLambdaResponse ->
+                    "InvalidLambdaResponseException"
 
                 PasswordResetRequired ->
                     "PasswordResetRequiredException"
@@ -138,6 +165,9 @@ failReasonEnum =
 
                 UserNotConfirmed ->
                     "UserNotConfirmedException"
+
+                AWSServerError ->
+                    "InternalErrorException"
 
                 _ ->
                     ""
@@ -568,7 +598,7 @@ getStatus model authState =
         AuthState.Failed state ->
             case extractError state of
                 Nothing ->
-                    Other "" |> Failed
+                    UnexpectedError "Internal Error in elm-auth-aws package" |> Failed
 
                 Just (AWS.Http.AWSError appErr) ->
                     case Enum.build failReasonEnum appErr.type_ of
@@ -576,10 +606,10 @@ getStatus model authState =
                             Failed reason
 
                         Nothing ->
-                            Other appErr.type_ |> Failed
+                            UnexpectedError appErr.type_ |> Failed
 
                 _ ->
-                    Other "" |> Failed
+                    UnexpectedError "Internal Error in elm-auth-aws package" |> Failed
 
         AuthState.LoggedIn state ->
             LoggedIn <| extractAuth state
