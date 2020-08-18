@@ -1,6 +1,7 @@
 module AWS.Auth exposing
     ( Config, Model, Msg
     , api, AuthExtensions, Challenge(..), CognitoAPI, FailReason(..)
+    , UserIdentityMappingConfig, UserIdentityMapping
     )
 
 {-| Manages the state of the authentication process, and provides an API
@@ -8,6 +9,7 @@ to request authentication operations.
 
 @docs Config, Model, Msg
 @docs api, AuthExtensions, Challenge, CognitoAPI, FailReason
+@docs UserIdentityMappingConfig, UserIdentityMapping
 
 -}
 
@@ -22,6 +24,7 @@ import AuthState exposing (Allowed, AuthState, Authenticated, ChallengeSpec)
 import Codec exposing (Codec)
 import Dict exposing (Dict)
 import Dict.Refined
+import Enum exposing (Enum)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Extra exposing (andMap, withDefault)
@@ -102,7 +105,43 @@ type alias AuthExtensions =
 {-| Gives a reason why the `Failed` state has been reached.
 -}
 type FailReason
-    = FailReason
+    = NotAuthorized
+    | ResourceNotFound
+    | PasswordResetRequired
+    | UserNotFound
+    | UserNotConfirmed
+    | Other String
+
+
+failReasonEnum : Enum FailReason
+failReasonEnum =
+    Enum.define
+        [ NotAuthorized
+        , ResourceNotFound
+        , PasswordResetRequired
+        , UserNotFound
+        , UserNotConfirmed
+        ]
+        (\val ->
+            case val of
+                NotAuthorized ->
+                    "NotAuthorizedException"
+
+                ResourceNotFound ->
+                    "ResourceNotFoundException"
+
+                PasswordResetRequired ->
+                    "PasswordResetRequiredException"
+
+                UserNotFound ->
+                    "UserNotFoundException"
+
+                UserNotConfirmed ->
+                    "UserNotConfirmedException"
+
+                _ ->
+                    ""
+        )
 
 
 {-| The types of challenges that Cognito can issue.
@@ -173,6 +212,9 @@ type alias Model =
     }
 
 
+{-| Holds the `UserIdentityMappingConfig` parameters if they pass parsing into
+the valid format accepeted by Cognito.
+-}
 type alias UserIdentityMapping =
     { identityPoolId : CI.IdentityPoolId
     , identityProviderName : CI.IdentityProviderName
@@ -228,11 +270,11 @@ type Msg
     | LogOut
     | NotAuthed
     | RespondToChallenge (Dict String String)
-    | InitiateAuthResponse (Result.Result Http.Error CIP.InitiateAuthResponse)
-    | SignOutResponse (Result.Result Http.Error ())
-    | RespondToChallengeResponse (Result.Result Http.Error CIP.RespondToAuthChallengeResponse)
-    | RequestAWSIdentityResponse (Result.Result Http.Error CI.GetIdResponse)
-    | RequestAWSCredentialsResponse (Result.Result Http.Error CI.GetCredentialsForIdentityResponse)
+    | InitiateAuthResponse (Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CIP.InitiateAuthResponse)
+    | SignOutResponse (Result.Result (AWS.Http.Error AWS.Http.AWSAppError) ())
+    | RespondToChallengeResponse (Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CIP.RespondToAuthChallengeResponse)
+    | RequestAWSIdentityResponse (Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CI.GetIdResponse)
+    | RequestAWSCredentialsResponse (Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CI.GetCredentialsForIdentityResponse)
     | Restore Value
 
 
@@ -498,6 +540,14 @@ getStatus model authState =
             case authModel.challenge.challenge of
                 _ ->
                     NewPasswordRequired
+
+        extractError : AuthState.State p { error : Maybe (AWS.Http.Error AWS.Http.AWSAppError) } -> Maybe (AWS.Http.Error AWS.Http.AWSAppError)
+        extractError state =
+            let
+                authModel =
+                    AuthState.untag state
+            in
+            authModel.error
     in
     case authState of
         AuthState.LoggedOut _ ->
@@ -515,8 +565,21 @@ getStatus model authState =
         AuthState.RequestingCredentials _ ->
             LoggedOut
 
-        AuthState.Failed _ ->
-            Failed FailReason
+        AuthState.Failed state ->
+            case extractError state of
+                Nothing ->
+                    Other "" |> Failed
+
+                Just (AWS.Http.AWSError appErr) ->
+                    case Enum.build failReasonEnum appErr.type_ of
+                        Just reason ->
+                            Failed reason
+
+                        Nothing ->
+                            Other appErr.type_ |> Failed
+
+                _ ->
+                    Other "" |> Failed
 
         AuthState.LoggedIn state ->
             LoggedIn <| extractAuth state
@@ -632,8 +695,8 @@ reset =
     ( AuthState.loggedOut, Cmd.none )
 
 
-failed state =
-    ( AuthState.toFailed state, Cmd.none )
+failed maybeError state =
+    ( AuthState.toFailed maybeError state, Cmd.none )
 
 
 updateLogin :
@@ -725,15 +788,15 @@ updateRefresh region clientId state =
 
 
 updateInitiateAuthResponse :
-    Result.Result Http.Error CIP.InitiateAuthResponse
+    Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CIP.InitiateAuthResponse
     -> Region
     -> Maybe UserIdentityMapping
     -> AuthState.State { a | loggedIn : Allowed, requestingId : Allowed, failed : Allowed, challenged : Allowed } m
     -> ( AuthState, Cmd Msg )
 updateInitiateAuthResponse loginResult region userIdentityMapping state =
     case loginResult of
-        Err httpErr ->
-            failed state
+        Err awsError ->
+            failed (Just awsError) state
 
         Ok authResponse ->
             case authResponse.authenticationResult of
@@ -748,7 +811,7 @@ updateInitiateAuthResponse loginResult region userIdentityMapping state =
                             handleChallenge session parameters challengeType state
 
                         ( _, _, _ ) ->
-                            failed state
+                            failed Nothing state
 
                 Just authResult ->
                     handleAuthResult authResult region userIdentityMapping state
@@ -815,14 +878,14 @@ handleAuthResult authResult region userIdentityMapping state =
                             )
 
                 _ ->
-                    failed state
+                    failed Nothing state
 
         _ ->
-            failed state
+            failed Nothing state
 
 
 updateInitiateAuthResponseForRefresh :
-    Result.Result Http.Error CIP.InitiateAuthResponse
+    Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CIP.InitiateAuthResponse
     -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated, credentials : Maybe AWS.Credentials.Credentials }
     -> ( AuthState, Cmd Msg )
 updateInitiateAuthResponseForRefresh loginResult state =
@@ -918,7 +981,7 @@ handleChallenge session parameters challengeType state =
             )
 
         _ ->
-            failed state
+            failed Nothing state
 
 
 updateRespondToChallenge :
@@ -955,15 +1018,15 @@ updateRespondToChallenge region clientId responseParams state =
 
 
 updateRespondToChallengeResponse :
-    Result.Result Http.Error CIP.RespondToAuthChallengeResponse
+    Result.Result (AWS.Http.Error AWS.Http.AWSAppError) CIP.RespondToAuthChallengeResponse
     -> Region
     -> Maybe UserIdentityMapping
     -> AuthState.State { a | loggedIn : Allowed, requestingId : Allowed, challenged : Allowed, failed : Allowed } { m | challenge : ChallengeSpec }
     -> ( AuthState, Cmd Msg )
 updateRespondToChallengeResponse challengeResult region userIdentityMapping state =
     case challengeResult of
-        Err httpErr ->
-            failed state
+        Err awsError ->
+            failed (Just awsError) state
 
         Ok authResponse ->
             case authResponse.authenticationResult of
@@ -978,7 +1041,7 @@ updateRespondToChallengeResponse challengeResult region userIdentityMapping stat
                             handleChallenge session parameters challengeType state
 
                         ( _, _, _ ) ->
-                            failed state
+                            failed Nothing state
 
                 Just authResult ->
                     handleAuthResult authResult region userIdentityMapping state
@@ -1025,7 +1088,7 @@ requestAWSIdentity region userIdentityMapping auth =
 updateRequestAWSIdentityResponse :
     Region
     -> Maybe UserIdentityMapping
-    -> Result Http.Error CI.GetIdResponse
+    -> Result (AWS.Http.Error AWS.Http.AWSAppError) CI.GetIdResponse
     -> AuthState.State { a | requestingCredentials : Allowed } { m | auth : Authenticated }
     -> ( AuthState, Cmd Msg )
 updateRequestAWSIdentityResponse region maybeUserIdentityMapping idResponseResult state =
@@ -1089,7 +1152,7 @@ requestAWSCredentials region userIdentityMapping identityId auth =
 
 
 updateRequestAWSCredentialsResponse :
-    Result Http.Error CI.GetCredentialsForIdentityResponse
+    Result (AWS.Http.Error AWS.Http.AWSAppError) CI.GetCredentialsForIdentityResponse
     -> AuthState.State { a | loggedIn : Allowed } { m | auth : Authenticated }
     -> ( AuthState, Cmd Msg )
 updateRequestAWSCredentialsResponse credentialsResponseResult state =
