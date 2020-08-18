@@ -22,6 +22,7 @@ module AuthState exposing
 import AWS.CognitoIdentity as CI
 import AWS.CognitoIdentityProvider as CIP
 import AWS.Credentials exposing (Credentials)
+import AWS.Http exposing (AWSAppError, Error)
 import AWS.Tokens exposing (AccessToken, IdToken)
 import StateMachine exposing (Allowed, State(..), map)
 import Time exposing (Posix)
@@ -70,7 +71,7 @@ type AuthState
     | Attempting (State { loggedIn : Allowed, requestingId : Allowed, failed : Allowed, challenged : Allowed } {})
     | RequestingId (State { requestingCredentials : Allowed } { auth : Authenticated })
     | RequestingCredentials (State { loggedIn : Allowed } { auth : Authenticated, id : CI.IdentityId })
-    | Failed (State {} {})
+    | Failed (State {} { error : Maybe (Error AWSAppError) })
     | LoggedIn (State { refreshing : Allowed, loggedOut : Allowed } { auth : Authenticated, credentials : Maybe Credentials })
     | Refreshing (State { loggedIn : Allowed } { auth : Authenticated, credentials : Maybe Credentials })
     | Challenged (State { responding : Allowed } { challenge : ChallengeSpec })
@@ -106,9 +107,9 @@ requestingCredentials auth identityId =
     State { auth = auth, id = identityId } |> RequestingCredentials
 
 
-failed : AuthState
-failed =
-    State {} |> Failed
+failed : Maybe (Error AWSAppError) -> AuthState
+failed maybeAppError =
+    State { error = maybeAppError } |> Failed
 
 
 loggedIn : Authenticated -> Maybe Credentials -> AuthState
@@ -186,9 +187,9 @@ toRequestingCredentials auth identityId _ =
     requestingCredentials auth identityId
 
 
-toFailed : State { a | failed : Allowed } m -> AuthState
-toFailed _ =
-    failed
+toFailed : Maybe (Error AWSAppError) -> State { a | failed : Allowed } m -> AuthState
+toFailed error _ =
+    failed error
 
 
 toLoggedIn : Authenticated -> Maybe Credentials -> State { a | loggedIn : Allowed } m -> AuthState

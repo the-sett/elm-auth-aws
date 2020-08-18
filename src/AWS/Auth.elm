@@ -24,6 +24,7 @@ import AuthState exposing (Allowed, AuthState, Authenticated, ChallengeSpec)
 import Codec exposing (Codec)
 import Dict exposing (Dict)
 import Dict.Refined
+import Enum exposing (Enum)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Extra exposing (andMap, withDefault)
@@ -109,6 +110,33 @@ type FailReason
     | UserNotFoundException
     | UserNotConfirmedException
     | Other String
+
+
+failReasonEnum : Enum FailReason
+failReasonEnum =
+    Enum.define
+        [ ResourceNotFoundException
+        , PasswordResetRequiredException
+        , UserNotFoundException
+        , UserNotConfirmedException
+        ]
+        (\val ->
+            case val of
+                ResourceNotFoundException ->
+                    "ResourceNotFoundException"
+
+                PasswordResetRequiredException ->
+                    "PasswordResetRequiredException"
+
+                UserNotFoundException ->
+                    "UserNotFoundException"
+
+                UserNotConfirmedException ->
+                    "UserNotConfirmedException"
+
+                _ ->
+                    ""
+        )
 
 
 {-| The types of challenges that Cognito can issue.
@@ -507,6 +535,14 @@ getStatus model authState =
             case authModel.challenge.challenge of
                 _ ->
                     NewPasswordRequired
+
+        extractError : AuthState.State p { error : Maybe (AWS.Http.Error AWS.Http.AWSAppError) } -> Maybe (AWS.Http.Error AWS.Http.AWSAppError)
+        extractError state =
+            let
+                authModel =
+                    AuthState.untag state
+            in
+            authModel.error
     in
     case authState of
         AuthState.LoggedOut _ ->
@@ -524,8 +560,21 @@ getStatus model authState =
         AuthState.RequestingCredentials _ ->
             LoggedOut
 
-        AuthState.Failed _ ->
-            Failed FailReason
+        AuthState.Failed state ->
+            case extractError state of
+                Nothing ->
+                    Other "" |> Failed
+
+                Just (AWS.Http.AWSError appErr) ->
+                    case Enum.build failReasonEnum appErr.type_ of
+                        Just reason ->
+                            Failed reason
+
+                        Nothing ->
+                            Other appErr.type_ |> Failed
+
+                _ ->
+                    Other "" |> Failed
 
         AuthState.LoggedIn state ->
             LoggedIn <| extractAuth state
