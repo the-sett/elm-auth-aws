@@ -104,8 +104,11 @@ type alias AuthExtensions =
 {-| Gives a reason why the `Failed` state has been reached.
 -}
 type FailReason
-    = PasswordResetRequired
-    | FailReason
+    = ResourceNotFoundException
+    | PasswordResetRequiredException
+    | UserNotFoundException
+    | UserNotConfirmedException
+    | Other String
 
 
 {-| The types of challenges that Cognito can issue.
