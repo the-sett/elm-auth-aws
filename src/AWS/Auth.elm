@@ -105,33 +105,38 @@ type alias AuthExtensions =
 {-| Gives a reason why the `Failed` state has been reached.
 -}
 type FailReason
-    = ResourceNotFoundException
-    | PasswordResetRequiredException
-    | UserNotFoundException
-    | UserNotConfirmedException
+    = NotAuthorized
+    | ResourceNotFound
+    | PasswordResetRequired
+    | UserNotFound
+    | UserNotConfirmed
     | Other String
 
 
 failReasonEnum : Enum FailReason
 failReasonEnum =
     Enum.define
-        [ ResourceNotFoundException
-        , PasswordResetRequiredException
-        , UserNotFoundException
-        , UserNotConfirmedException
+        [ NotAuthorized
+        , ResourceNotFound
+        , PasswordResetRequired
+        , UserNotFound
+        , UserNotConfirmed
         ]
         (\val ->
             case val of
-                ResourceNotFoundException ->
+                NotAuthorized ->
+                    "NotAuthorizedException"
+
+                ResourceNotFound ->
                     "ResourceNotFoundException"
 
-                PasswordResetRequiredException ->
+                PasswordResetRequired ->
                     "PasswordResetRequiredException"
 
-                UserNotFoundException ->
+                UserNotFound ->
                     "UserNotFoundException"
 
-                UserNotConfirmedException ->
+                UserNotConfirmed ->
                     "UserNotConfirmedException"
 
                 _ ->
@@ -690,8 +695,8 @@ reset =
     ( AuthState.loggedOut, Cmd.none )
 
 
-failed state =
-    ( AuthState.toFailed state, Cmd.none )
+failed maybeError state =
+    ( AuthState.toFailed maybeError state, Cmd.none )
 
 
 updateLogin :
@@ -790,11 +795,8 @@ updateInitiateAuthResponse :
     -> ( AuthState, Cmd Msg )
 updateInitiateAuthResponse loginResult region userIdentityMapping state =
     case loginResult of
-        Err (AWS.Http.HttpError httpErr) ->
-            failed state
-
-        Err (AWS.Http.AWSError appErr) ->
-            failed state
+        Err awsError ->
+            failed (Just awsError) state
 
         Ok authResponse ->
             case authResponse.authenticationResult of
@@ -809,7 +811,7 @@ updateInitiateAuthResponse loginResult region userIdentityMapping state =
                             handleChallenge session parameters challengeType state
 
                         ( _, _, _ ) ->
-                            failed state
+                            failed Nothing state
 
                 Just authResult ->
                     handleAuthResult authResult region userIdentityMapping state
@@ -876,10 +878,10 @@ handleAuthResult authResult region userIdentityMapping state =
                             )
 
                 _ ->
-                    failed state
+                    failed Nothing state
 
         _ ->
-            failed state
+            failed Nothing state
 
 
 updateInitiateAuthResponseForRefresh :
@@ -979,7 +981,7 @@ handleChallenge session parameters challengeType state =
             )
 
         _ ->
-            failed state
+            failed Nothing state
 
 
 updateRespondToChallenge :
@@ -1023,8 +1025,8 @@ updateRespondToChallengeResponse :
     -> ( AuthState, Cmd Msg )
 updateRespondToChallengeResponse challengeResult region userIdentityMapping state =
     case challengeResult of
-        Err httpErr ->
-            failed state
+        Err awsError ->
+            failed (Just awsError) state
 
         Ok authResponse ->
             case authResponse.authenticationResult of
@@ -1039,7 +1041,7 @@ updateRespondToChallengeResponse challengeResult region userIdentityMapping stat
                             handleChallenge session parameters challengeType state
 
                         ( _, _, _ ) ->
-                            failed state
+                            failed Nothing state
 
                 Just authResult ->
                     handleAuthResult authResult region userIdentityMapping state
