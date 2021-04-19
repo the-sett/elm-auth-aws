@@ -21,8 +21,7 @@
         "the-sett/elm-aws-core": "8.0.0 <= v < 9.0.0",
         "the-sett/elm-refine": "1.4.0 <= v < 2.0.0",
         "the-sett/elm-state-machines": "1.0.1 <= v < 2.0.0",
-        "the-sett/elm-update-helper": "1.4.1 <= v < 2.0.0",
-        "truqu/elm-base64": "2.0.4 <= v < 3.0.0"
+        "the-sett/elm-update-helper": "1.4.1 <= v < 2.0.0"
     },
     "test-dependencies": {}
 }
